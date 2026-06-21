@@ -38,6 +38,29 @@ def test_importing_runner_does_not_import_matplotlib() -> None:
     assert completed.stdout.strip() == "False"
 
 
+def test_runner_cli_supports_stage_names(tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    data_root = tmp_path / "empty_data"
+    data_root.mkdir()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pump_diagnosis.runner",
+            "--stage",
+            "inspect",
+            "--data-root",
+            str(data_root),
+            "--output-root",
+            str(output_root),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+    assert (output_root / "inspect_summary.json").exists()
+
+
 def _valid_feature_row(label: str = "正常") -> dict[str, object]:
     row: dict[str, object] = {
         "sample_id": "sample_0",
