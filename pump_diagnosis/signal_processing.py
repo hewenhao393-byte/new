@@ -19,7 +19,8 @@ def preprocess_run(samples: np.ndarray, config: PipelineConfig) -> np.ndarray:
         output="sos",
     )
     filtered = signal.sosfiltfilt(sos, resampled)
-    return np.asarray(filtered, dtype=np.float64)
+    filtered = np.asarray(filtered, dtype=np.float64)
+    return filtered - np.mean(filtered)
 
 
 def iter_windows(
