@@ -115,7 +115,8 @@ def test_normalize_window_waveform_scales_to_unit_range() -> None:
 def test_should_expand_envelope_limit_only_when_peak_exceeds_300() -> None:
     assert not should_expand_envelope_limit([120.0, 180.0, 250.0])
     assert not should_expand_envelope_limit([300.0])
-    assert should_expand_envelope_limit([120.0, 180.0, 305.0])
+    assert not should_expand_envelope_limit([120.0, 180.0, 305.0])
+    assert should_expand_envelope_limit([120.0, 180.0, 305.0, 320.0, 340.0, 360.0])
 
 
 def test_normalize_window_waveform_keeps_zero_waveform_at_zero() -> None:
@@ -201,3 +202,11 @@ def test_create_page_matches_required_three_by_two_layout_and_a4ish_size() -> No
     assert positions[4][0] < positions[5][0]
 
     fig.clf()
+
+
+def test_current_redraw_envelope_export_uses_300hz_limit() -> None:
+    output = RedrawConfig().output_root / "fig4_6_envelope_spectrum.csv"
+    frame = pd.read_csv(output)
+
+    assert output.exists()
+    assert set(frame["envelope_limit_hz"].astype(float)) == {300.0}

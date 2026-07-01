@@ -162,7 +162,13 @@ def normalize_window_waveform(waveform: Iterable[float] | np.ndarray) -> np.ndar
 
 
 def should_expand_envelope_limit(peaks_hz: Iterable[float]) -> bool:
-    return any(float(peak) > ENVELOPE_EXPAND_LIMIT_HZ for peak in peaks_hz)
+    valid_peaks = np.asarray(
+        [float(peak) for peak in peaks_hz if np.isfinite(float(peak)) and float(peak) > 0.0],
+        dtype=float,
+    )
+    if valid_peaks.size == 0:
+        return False
+    return float(np.median(valid_peaks)) > ENVELOPE_EXPAND_LIMIT_HZ
 
 
 def write_representative_window_manifest(rows: Iterable[dict[str, object]], output: Path) -> Path:
