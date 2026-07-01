@@ -104,6 +104,10 @@ class RedrawConfig:
     wavelet_level: int = 3
     plot_dpi: int = 300
     font_size: int = 11
+    page_title_size: float = 11.5
+    panel_title_size: float = 10.8
+    axis_label_size: float = 9.5
+    tick_label_size: float = 8.8
     csv_encoding: str = "utf-8-sig"
 
 
@@ -323,7 +327,7 @@ def _relative_db(values: np.ndarray, floor: float) -> np.ndarray:
 
 def _write_time_waveform_figure(bundles: dict[str, dict[str, object]], config: RedrawConfig) -> Path:
     rows = []
-    fig, axes = _create_page("六类状态代表样本的归一化时域波形")
+    fig, axes = _create_page("六类状态代表样本的归一化时域波形", config)
     for ax, label in zip(axes, CLASS_LAYOUT_ORDER):
         bundle = bundles[label]
         metadata = bundle["metadata"]
@@ -332,8 +336,8 @@ def _write_time_waveform_figure(bundles: dict[str, dict[str, object]], config: R
         ax.set_ylim(-1.05, 1.05)
         ax.set_xlabel("时间 / s")
         ax.set_ylabel("归一化幅值")
-        ax.set_title(_panel_title(metadata))
-        _style_axis(ax)
+        ax.set_title(_panel_title(metadata), fontsize=config.panel_title_size)
+        _style_axis(ax, config)
         rows.extend(
             {
                 **_manifest_row(metadata),
@@ -357,7 +361,7 @@ def _write_time_waveform_figure(bundles: dict[str, dict[str, object]], config: R
 
 def _write_low_frequency_figure(bundles: dict[str, dict[str, object]], config: RedrawConfig) -> Path:
     rows = []
-    fig, axes = _create_page("六类状态代表样本的低频频谱")
+    fig, axes = _create_page("六类状态代表样本的低频频谱", config)
     for ax, label in zip(axes, CLASS_LAYOUT_ORDER):
         bundle = bundles[label]
         metadata = bundle["metadata"]
@@ -367,8 +371,8 @@ def _write_low_frequency_figure(bundles: dict[str, dict[str, object]], config: R
         ax.set_ylim(0.0, 1.05)
         ax.set_xlabel("频率 / Hz")
         ax.set_ylabel("归一化谱幅值")
-        ax.set_title(_panel_title(metadata))
-        _style_axis(ax)
+        ax.set_title(_panel_title(metadata), fontsize=config.panel_title_size)
+        _style_axis(ax, config)
         rows.extend(
             {
                 **_manifest_row(metadata),
@@ -393,7 +397,7 @@ def _write_low_frequency_figure(bundles: dict[str, dict[str, object]], config: R
 
 def _write_full_spectrum_figure(bundles: dict[str, dict[str, object]], config: RedrawConfig) -> Path:
     rows = []
-    fig, axes = _create_page("六类状态代表样本的0～5000 Hz全频频谱")
+    fig, axes = _create_page("六类状态代表样本的0～5000 Hz全频频谱", config)
     for ax, label in zip(axes, CLASS_LAYOUT_ORDER):
         bundle = bundles[label]
         metadata = bundle["metadata"]
@@ -403,8 +407,8 @@ def _write_full_spectrum_figure(bundles: dict[str, dict[str, object]], config: R
         ax.set_ylim(FULL_SPECTRUM_DB_FLOOR, 0.0)
         ax.set_xlabel("频率 / Hz")
         ax.set_ylabel("相对幅值 / dB")
-        ax.set_title(_panel_title(metadata))
-        _style_axis(ax)
+        ax.set_title(_panel_title(metadata), fontsize=config.panel_title_size)
+        _style_axis(ax, config)
         rows.extend(
             {
                 **_manifest_row(metadata),
@@ -429,7 +433,7 @@ def _write_full_spectrum_figure(bundles: dict[str, dict[str, object]], config: R
 
 def _write_wavelet_figure(bundles: dict[str, dict[str, object]], config: RedrawConfig) -> Path:
     rows = []
-    fig, axes = _create_page("六类状态代表样本的小波包节点能量占比")
+    fig, axes = _create_page("六类状态代表样本的小波包节点能量占比", config)
     y_max = max(float(np.max(bundle["wavelet_ratios"])) for bundle in bundles.values())
     y_limit = min(1.0, max(0.2, y_max * 1.15))
 
@@ -443,8 +447,8 @@ def _write_wavelet_figure(bundles: dict[str, dict[str, object]], config: RedrawC
         ax.set_xticks(indices)
         ax.set_xlabel("节点编号")
         ax.set_ylabel("能量占比")
-        ax.set_title(_panel_title(metadata))
-        _style_axis(ax, y_grid_only=True)
+        ax.set_title(_panel_title(metadata), fontsize=config.panel_title_size)
+        _style_axis(ax, config, y_grid_only=True)
         for bar, value in zip(bars, values):
             ax.text(
                 float(bar.get_x() + bar.get_width() / 2.0),
@@ -452,7 +456,7 @@ def _write_wavelet_figure(bundles: dict[str, dict[str, object]], config: RedrawC
                 f"{value:.2f}",
                 ha="center",
                 va="bottom",
-                fontsize=max(config.font_size - 2, 8),
+                fontsize=max(config.tick_label_size - 0.3, 8),
             )
         rows.extend(
             {
@@ -483,7 +487,7 @@ def _write_envelope_figure(bundles: dict[str, dict[str, object]], config: Redraw
     )
 
     rows = []
-    fig, axes = _create_page("六类状态代表样本的包络谱")
+    fig, axes = _create_page("六类状态代表样本的包络谱", config)
     for ax, label in zip(axes, CLASS_LAYOUT_ORDER):
         bundle = bundles[label]
         metadata = bundle["metadata"]
@@ -496,8 +500,8 @@ def _write_envelope_figure(bundles: dict[str, dict[str, object]], config: Redraw
         ax.set_ylim(0.0, max(float(np.max(env_amps)) * 1.08, _EPS))
         ax.set_xlabel("频率 / Hz")
         ax.set_ylabel("幅值 / a.u.")
-        ax.set_title(_panel_title(metadata))
-        _style_axis(ax)
+        ax.set_title(_panel_title(metadata), fontsize=config.panel_title_size)
+        _style_axis(ax, config)
         rows.extend(
             {
                 **_manifest_row(metadata),
@@ -572,17 +576,21 @@ def _add_full_spectrum_bands(ax: plt.Axes) -> None:
         ax.axvspan(low, high, color=color, alpha=1.0, zorder=0)
 
 
-def _create_page(title: str) -> tuple[plt.Figure, list[plt.Axes]]:
-    fig, axes = plt.subplots(2, 3, figsize=(10.4, 11.6))
-    fig.suptitle(title)
+def _create_page(title: str, config: RedrawConfig | None = None) -> tuple[plt.Figure, list[plt.Axes]]:
+    page_config = config or RedrawConfig()
+    fig, axes = plt.subplots(3, 2, figsize=(16.0 / 2.54, 19.0 / 2.54))
+    fig.suptitle(title, fontsize=page_config.page_title_size)
     return fig, list(axes.flatten())
 
 
-def _style_axis(ax: plt.Axes, y_grid_only: bool = False) -> None:
+def _style_axis(ax: plt.Axes, config: RedrawConfig, y_grid_only: bool = False) -> None:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_linewidth(0.8)
     ax.spines["bottom"].set_linewidth(0.8)
+    ax.xaxis.label.set_size(config.axis_label_size)
+    ax.yaxis.label.set_size(config.axis_label_size)
+    ax.tick_params(axis="both", labelsize=config.tick_label_size)
     if y_grid_only:
         ax.grid(True, axis="y", color="#d9d9d9", linewidth=0.6, alpha=0.8)
     else:

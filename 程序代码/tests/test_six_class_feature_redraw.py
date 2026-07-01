@@ -9,6 +9,7 @@ import pytest
 from pump_diagnosis.six_class_feature_redraw import (
     CLASS_LAYOUT_ORDER,
     REDRAW_FEATURE_COLUMNS,
+    _create_page,
     RedrawConfig,
     normalize_window_waveform,
     select_representative_windows,
@@ -180,3 +181,23 @@ def test_redraw_config_uses_thesis_window_defaults(tmp_path: Path) -> None:
     assert config.processed_fs == 12_000
     assert config.window_size == 2400
     assert config.window_step == 1200
+
+
+def test_create_page_matches_required_three_by_two_layout_and_a4ish_size() -> None:
+    fig, axes = _create_page("示例图")
+
+    size_inches = fig.get_size_inches()
+    positions = [ax.get_position().bounds for ax in axes]
+
+    assert len(axes) == 6
+    assert np.isclose(size_inches[0], 16.0 / 2.54, atol=0.1)
+    assert (18.0 / 2.54) <= size_inches[1] <= (20.0 / 2.54)
+    assert np.isclose(positions[0][1], positions[1][1], atol=1e-3)
+    assert np.isclose(positions[2][1], positions[3][1], atol=1e-3)
+    assert np.isclose(positions[4][1], positions[5][1], atol=1e-3)
+    assert positions[0][1] > positions[2][1] > positions[4][1]
+    assert positions[0][0] < positions[1][0]
+    assert positions[2][0] < positions[3][0]
+    assert positions[4][0] < positions[5][0]
+
+    fig.clf()
