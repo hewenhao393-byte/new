@@ -39,6 +39,8 @@ REDRAW_FEATURE_COLUMNS = [
     "env_crest_factor",
 ]
 
+ENVELOPE_EXPAND_LIMIT_HZ = 300.0
+
 
 def select_representative_windows(frame: pd.DataFrame) -> dict[str, dict[str, object]]:
     missing_columns = [column for column in REDRAW_FEATURE_COLUMNS if column not in frame.columns]
@@ -51,6 +53,11 @@ def select_representative_windows(frame: pd.DataFrame) -> dict[str, dict[str, ob
         return selected
 
     feature_frame = frame.loc[:, REDRAW_FEATURE_COLUMNS].astype(float)
+    non_finite_mask = ~np.isfinite(feature_frame.to_numpy(dtype=float))
+    if non_finite_mask.any():
+        bad_rows = np.flatnonzero(non_finite_mask.any(axis=1))
+        raise ValueError(f"frame contains non-finite redraw feature values at rows: {bad_rows.tolist()}")
+
     for label, label_frame in frame.groupby("label", sort=False):
         label_features = feature_frame.loc[label_frame.index]
         center = label_features.mean(axis=0).to_numpy(dtype=float)
@@ -79,4 +86,4 @@ def normalize_window_waveform(waveform: Iterable[float] | np.ndarray) -> np.ndar
 
 
 def should_expand_envelope_limit(peaks_hz: Iterable[float]) -> bool:
-    return any(float(peak) > 300.0 for peak in peaks_hz)
+    return any(float(peak) > ENVELOPE_EXPAND_LIMIT_HZ for peak in peaks_hz)

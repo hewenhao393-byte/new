@@ -34,7 +34,17 @@ def test_select_representative_windows_returns_one_window_per_class() -> None:
                 "source_file": "a.csv",
                 "group_id": "g1",
                 "window_id": "w2",
-                **{name: 1.0 for name in REDRAW_FEATURE_COLUMNS},
+                **{name: 2.0 for name in REDRAW_FEATURE_COLUMNS},
+            },
+            {
+                "label": "正常",
+                "device_id": "Motor-2",
+                "speed_percent": 100,
+                "rpm": 1480,
+                "source_file": "a.csv",
+                "group_id": "g1",
+                "window_id": "w5",
+                **{name: 10.0 for name in REDRAW_FEATURE_COLUMNS},
             },
             {
                 "label": "转子不平衡",
@@ -44,7 +54,7 @@ def test_select_representative_windows_returns_one_window_per_class() -> None:
                 "source_file": "b.csv",
                 "group_id": "g2",
                 "window_id": "w3",
-                **{name: 2.0 for name in REDRAW_FEATURE_COLUMNS},
+                **{name: 1.0 for name in REDRAW_FEATURE_COLUMNS},
             },
             {
                 "label": "转子不平衡",
@@ -56,14 +66,24 @@ def test_select_representative_windows_returns_one_window_per_class() -> None:
                 "window_id": "w4",
                 **{name: 3.0 for name in REDRAW_FEATURE_COLUMNS},
             },
+            {
+                "label": "转子不平衡",
+                "device_id": "Motor-4",
+                "speed_percent": 70,
+                "rpm": 2070,
+                "source_file": "b.csv",
+                "group_id": "g2",
+                "window_id": "w6",
+                **{name: 9.0 for name in REDRAW_FEATURE_COLUMNS},
+            },
         ]
     )
 
     selected = select_representative_windows(frame)
 
     assert set(selected) == {"正常", "转子不平衡"}
-    assert selected["正常"]["window_id"] == "w1"
-    assert selected["转子不平衡"]["window_id"] == "w3"
+    assert selected["正常"]["window_id"] == "w2"
+    assert selected["转子不平衡"]["window_id"] == "w4"
 
 
 def test_select_representative_windows_rejects_missing_feature_columns() -> None:
@@ -86,6 +106,28 @@ def test_select_representative_windows_rejects_missing_feature_columns() -> None
         select_representative_windows(frame)
 
 
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
+def test_select_representative_windows_rejects_non_finite_values(bad_value: float) -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "label": "正常",
+                "device_id": "Motor-2",
+                "speed_percent": 100,
+                "rpm": 1480,
+                "source_file": "a.csv",
+                "group_id": "g1",
+                "window_id": "w1",
+                **{name: 0.0 for name in REDRAW_FEATURE_COLUMNS},
+            }
+        ]
+    )
+    frame.loc[0, REDRAW_FEATURE_COLUMNS[0]] = bad_value
+
+    with pytest.raises(ValueError, match="non-finite redraw feature values"):
+        select_representative_windows(frame)
+
+
 def test_normalize_window_waveform_scales_to_unit_range() -> None:
     waveform = np.array([0.0, 2.0, -4.0, 1.0], dtype=float)
 
@@ -97,7 +139,25 @@ def test_normalize_window_waveform_scales_to_unit_range() -> None:
 
 def test_should_expand_envelope_limit_only_when_peak_exceeds_300() -> None:
     assert not should_expand_envelope_limit([120.0, 180.0, 250.0])
+    assert not should_expand_envelope_limit([300.0])
     assert should_expand_envelope_limit([120.0, 180.0, 305.0])
+
+
+def test_normalize_window_waveform_keeps_zero_waveform_at_zero() -> None:
+    waveform = np.zeros(6, dtype=float)
+
+    normalized = normalize_window_waveform(waveform)
+
+    assert np.array_equal(normalized, waveform)
+    assert normalized.dtype == float
+
+
+def test_normalize_window_waveform_handles_empty_waveform() -> None:
+    waveform = np.array([], dtype=float)
+
+    normalized = normalize_window_waveform(waveform)
+
+    assert normalized.size == 0
 
 
 def test_layout_order_matches_required_2x3_sequence() -> None:
