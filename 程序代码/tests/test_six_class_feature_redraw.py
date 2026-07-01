@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,9 +9,11 @@ import pytest
 from pump_diagnosis.six_class_feature_redraw import (
     CLASS_LAYOUT_ORDER,
     REDRAW_FEATURE_COLUMNS,
+    RedrawConfig,
     normalize_window_waveform,
     select_representative_windows,
     should_expand_envelope_limit,
+    write_representative_window_manifest,
 )
 
 
@@ -139,3 +143,40 @@ def test_layout_order_matches_required_2x3_sequence() -> None:
         "轴承故障",
         "汽蚀",
     ]
+
+
+def test_write_representative_window_manifest_preserves_required_columns(tmp_path: Path) -> None:
+    rows = [
+        {
+            "label": "正常",
+            "device_id": "Motor-2",
+            "speed_percent": 100,
+            "rpm": 1480.0,
+            "source_file": "x.csv",
+            "group_id": "g1",
+            "window_id": "w1",
+        }
+    ]
+    output = tmp_path / "representative_windows.csv"
+
+    write_representative_window_manifest(rows, output)
+
+    frame = pd.read_csv(output)
+    assert frame.columns.tolist()[:7] == [
+        "label",
+        "device_id",
+        "speed_percent",
+        "rpm",
+        "source_file",
+        "group_id",
+        "window_id",
+    ]
+
+
+def test_redraw_config_uses_thesis_window_defaults(tmp_path: Path) -> None:
+    config = RedrawConfig(output_root=tmp_path)
+
+    assert config.output_root == tmp_path
+    assert config.processed_fs == 12_000
+    assert config.window_size == 2400
+    assert config.window_step == 1200
