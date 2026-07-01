@@ -52,6 +52,11 @@ def select_representative_windows(frame: pd.DataFrame) -> dict[str, dict[str, ob
     if frame.empty:
         return selected
 
+    missing_labels = [label for label in CLASS_LAYOUT_ORDER if label not in set(frame["label"])]
+    if missing_labels:
+        missing_list = ", ".join(missing_labels)
+        raise ValueError(f"frame is missing required redraw labels: {missing_list}")
+
     feature_frame = frame.loc[:, REDRAW_FEATURE_COLUMNS].astype(float)
     non_finite_mask = ~np.isfinite(feature_frame.to_numpy(dtype=float))
     if non_finite_mask.any():
