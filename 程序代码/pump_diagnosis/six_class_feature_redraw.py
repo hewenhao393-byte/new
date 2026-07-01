@@ -41,15 +41,16 @@ REDRAW_FEATURE_COLUMNS = [
 
 
 def select_representative_windows(frame: pd.DataFrame) -> dict[str, dict[str, object]]:
+    missing_columns = [column for column in REDRAW_FEATURE_COLUMNS if column not in frame.columns]
+    if missing_columns:
+        missing_list = ", ".join(missing_columns)
+        raise ValueError(f"frame is missing required redraw feature columns: {missing_list}")
+
     selected: dict[str, dict[str, object]] = {}
     if frame.empty:
         return selected
 
-    feature_columns = [column for column in REDRAW_FEATURE_COLUMNS if column in frame.columns]
-    if not feature_columns:
-        raise ValueError("frame does not contain any redraw feature columns")
-
-    feature_frame = frame.loc[:, feature_columns].astype(float)
+    feature_frame = frame.loc[:, REDRAW_FEATURE_COLUMNS].astype(float)
     for label, label_frame in frame.groupby("label", sort=False):
         label_features = feature_frame.loc[label_frame.index]
         center = label_features.mean(axis=0).to_numpy(dtype=float)

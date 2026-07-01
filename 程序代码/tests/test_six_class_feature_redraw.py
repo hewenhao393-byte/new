@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pump_diagnosis.six_class_feature_redraw import (
     CLASS_LAYOUT_ORDER,
@@ -63,6 +64,26 @@ def test_select_representative_windows_returns_one_window_per_class() -> None:
     assert set(selected) == {"正常", "转子不平衡"}
     assert selected["正常"]["window_id"] == "w1"
     assert selected["转子不平衡"]["window_id"] == "w3"
+
+
+def test_select_representative_windows_rejects_missing_feature_columns() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "label": "正常",
+                "device_id": "Motor-2",
+                "speed_percent": 100,
+                "rpm": 1480,
+                "source_file": "a.csv",
+                "group_id": "g1",
+                "window_id": "w1",
+                **{name: 0.0 for name in REDRAW_FEATURE_COLUMNS[:-1]},
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="missing required redraw feature columns"):
+        select_representative_windows(frame)
 
 
 def test_normalize_window_waveform_scales_to_unit_range() -> None:
