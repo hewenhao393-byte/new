@@ -1,0 +1,11 @@
+﻿model,params,fold,macro_f1,group_overlap_count
+svm,"{""C"": 1.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",0,0.9030427949608278,0
+svm,"{""C"": 1.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",1,0.9024314897943263,0
+svm,"{""C"": 1.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",2,0.908417218220449,0
+svm,"{""C"": 1.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",3,0.8794408134719229,0
+svm,"{""C"": 1.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",4,0.8912788462632406,0
+svm,"{""C"": 10.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",0,0.9213469939310382,0
+svm,"{""C"": 10.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",1,0.9219789969283724,0
+svm,"{""C"": 10.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",2,0.9330186919208318,0
+svm,"{""C"": 10.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",3,0.9079741050987783,0
+svm,"{""C"": 10.0, ""class_weight"": ""balanced"", ""gamma"": ""scale"", ""kernel"": ""rbf""}",4,0.9162782346533089,0

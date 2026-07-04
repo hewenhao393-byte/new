@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Large generated experiment artifacts
+实验结果/**/*.joblib
+实验结果/**/*_raw.csv
+实验结果/**/*_scaled.csv
+实验结果/**/window_predictions.csv
+实验结果/**/unified_six_class_dataset_raw.csv
+实验结果/Motor2_*rpm_三分类_通道4_特征表.csv
+实验结果/Motor4_*rpm_四分类_通道4_特征表.csv
+实验结果/Motor2_group_cv_raw_protocol/
+实验结果/Motor4_80_20_group_split_standardized/
+
+# Temporary render outputs
+实验结果/docx_render_v2_ch4/

@@ -1,0 +1,2 @@
+﻿model,best_params,accuracy,balanced_accuracy,macro_precision,macro_recall,macro_f1,weighted_f1,group_majority_accuracy,group_majority_macro_f1,group_probability_accuracy,group_probability_macro_f1
+random_forest,"{'n_estimators': 120, 'max_depth': 20, 'max_features': 'sqrt', 'class_weight': 'balanced_subsample'}",0.9997722666302293,0.9997947167280172,0.9997063673535835,0.9997947167280172,0.9997505176875874,0.999772276695301,1.0,1.0,1.0,1.0

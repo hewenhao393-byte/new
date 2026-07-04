@@ -1,0 +1,2 @@
+﻿column_match,processing_match,window_count_match,expected_window_count_per_group,is_consistent,shared_config
+True,True,True,119,True,"{""processed_fs"": 12000, ""bandpass_low"": 10.0, ""bandpass_high"": 5000.0, ""window_size"": 2400, ""step_size"": 1200, ""wavelet"": ""db6"", ""wavelet_level"": 3, ""envelope_band_low"": 2000.0, ""envelope_band_high"": 5000.0}"

@@ -1,0 +1,16 @@
+{
+  "rows": 77588,
+  "files": 33,
+  "labels": {
+    "联轴器不对中": 25823,
+    "正常": 21420,
+    "转子不平衡": 15232,
+    "汽蚀": 15113
+  },
+  "window_size": 2400,
+  "step_size": 1200,
+  "processed_fs": 12000,
+  "rpm": 2070.0,
+  "rotation_frequency_hz": 34.5,
+  "wavelet": "db6"
+}

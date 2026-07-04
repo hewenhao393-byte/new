@@ -1,0 +1,13 @@
+﻿model,metric,value
+bp,accuracy,0.9431805242422172
+random_forest,accuracy,0.93935460363007
+svm,accuracy,0.8635421648334131
+bp,balanced_accuracy,0.9454905716465224
+random_forest,balanced_accuracy,0.934191717488571
+svm,balanced_accuracy,0.9016192031103112
+bp,macro_f1,0.9414631891908418
+random_forest,macro_f1,0.936936216280268
+svm,macro_f1,0.872105105493854
+bp,weighted_f1,0.9434455225419528
+random_forest,weighted_f1,0.9390620981835396
+svm,weighted_f1,0.8656116317196061

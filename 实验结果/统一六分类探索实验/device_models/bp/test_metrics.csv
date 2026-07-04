@@ -1,0 +1,2 @@
+﻿model,best_params,accuracy,balanced_accuracy,macro_f1,weighted_f1,precision_Motor-2,recall_Motor-2,f1_Motor-2,precision_Motor-4,recall_Motor-4,f1_Motor-4
+bp,"{'hidden_layer_sizes': (64, 32), 'alpha': 0.001, 'learning_rate_init': 0.001, 'early_stopping': False, 'validation_fraction': 0.1, 'n_iter_no_change': 10}",0.999452804377565,0.9993079584775086,0.9994275975950015,0.9994527386493184,1.0,0.9986159169550173,0.9993074792243767,0.9990958408679927,1.0,0.9995477159656264

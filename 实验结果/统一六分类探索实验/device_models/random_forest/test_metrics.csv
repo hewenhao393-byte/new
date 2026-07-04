@@ -1,0 +1,2 @@
+﻿model,best_params,accuracy,balanced_accuracy,macro_f1,weighted_f1,precision_Motor-2,recall_Motor-2,f1_Motor-2,precision_Motor-4,recall_Motor-4,f1_Motor-4
+random_forest,"{'n_estimators': 120, 'max_depth': 20, 'max_features': 'sqrt', 'class_weight': 'balanced_subsample'}",0.9993355481727575,0.9991596638655462,0.9993049041437412,0.9993354511979822,1.0,0.9983193277310924,0.9991589571068125,0.9989023051591658,1.0,0.99945085118067

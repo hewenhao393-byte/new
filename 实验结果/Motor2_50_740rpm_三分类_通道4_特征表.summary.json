@@ -1,0 +1,14 @@
+{
+  "rows": 43435,
+  "files": 16,
+  "labels": {
+    "正常": 19635,
+    "轴承故障": 18683,
+    "松动": 5117
+  },
+  "window_size": 2400,
+  "step_size": 1200,
+  "processed_fs": 12000,
+  "rpm": 740.0,
+  "wavelet": "db6"
+}

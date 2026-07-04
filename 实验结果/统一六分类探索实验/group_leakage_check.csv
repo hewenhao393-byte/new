@@ -1,0 +1,2 @@
+﻿group_overlap_count,window_overlap_count,train_groups,test_groups,train_rows,test_rows,train_label_distribution,test_label_distribution,train_device_distribution,test_device_distribution
+0,0,860,215,102340,25585,"{""正常"": 34986, ""联轴器不对中"": 20706, ""轴承故障"": 16660, ""汽蚀"": 12138, ""转子不平衡"": 12138, ""松动"": 5712}","{""正常"": 8806, ""联轴器不对中"": 5117, ""轴承故障"": 4165, ""转子不平衡"": 3094, ""汽蚀"": 2975, ""松动"": 1428}","{""Motor-4"": 62118, ""Motor-2"": 40222}","{""Motor-4"": 15470, ""Motor-2"": 10115}"

@@ -1,0 +1,9 @@
+﻿original_node,frequency_order_node,f_low,f_high,validated_dominant_node
+aaa,0,0.0,750.0,0
+aad,1,750.0,1500.0,1
+add,2,1500.0,2250.0,2
+ada,3,2250.0,3000.0,3
+dda,4,3000.0,3750.0,4
+ddd,5,3750.0,4500.0,5
+dad,6,4500.0,5250.0,6
+daa,7,5250.0,6000.0,7

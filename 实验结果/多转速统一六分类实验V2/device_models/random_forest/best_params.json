@@ -1,0 +1,6 @@
+{
+  "n_estimators": 120,
+  "max_depth": 20,
+  "max_features": "sqrt",
+  "class_weight": "balanced_subsample"
+}

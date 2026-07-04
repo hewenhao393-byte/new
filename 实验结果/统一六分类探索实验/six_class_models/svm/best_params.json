@@ -1,0 +1,6 @@
+{
+  "C": 10.0,
+  "kernel": "rbf",
+  "gamma": "scale",
+  "class_weight": "balanced"
+}

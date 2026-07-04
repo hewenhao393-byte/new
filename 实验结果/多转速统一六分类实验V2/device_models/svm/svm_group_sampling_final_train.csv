@@ -1,0 +1,5 @@
+﻿device_id,speed_percent,group_count_total,window_count_total,group_count_selected,window_count_selected,desired_group_count,selected_group_count_total,selected_window_count_total
+Motor-2,50,292,34748,50,5950,250,250,29750
+Motor-2,75,324,38556,55,6545,250,250,29750
+Motor-2,100,338,40222,57,6783,250,250,29750
+Motor-4,70,522,62118,88,10472,250,250,29750

@@ -11,9 +11,14 @@ from pump_diagnosis.six_class_feature_redraw import (
     REDRAW_FEATURE_COLUMNS,
     _create_page,
     RedrawConfig,
+    build_node_frequency_mapping,
+    infer_windowing_from_frame,
     normalize_window_waveform,
+    select_representative_records,
     select_representative_windows,
     should_expand_envelope_limit,
+    validate_group_source_relationship,
+    validate_redraw_outputs,
     write_representative_window_manifest,
 )
 
@@ -210,3 +215,80 @@ def test_current_redraw_envelope_export_uses_300hz_limit() -> None:
 
     assert output.exists()
     assert set(frame["envelope_limit_hz"].astype(float)) == {300.0}
+
+
+def test_validate_redraw_outputs_requires_complete_export_set(tmp_path: Path) -> None:
+    (tmp_path / "representative_windows.csv").write_text("", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="Missing redraw outputs"):
+        validate_redraw_outputs(tmp_path)
+
+
+def test_select_representative_records_uses_group_means_and_scaling() -> None:
+    rows = []
+    for label in CLASS_LAYOUT_ORDER:
+        for group_id, base in [(f"{label}-g1", 10.0), (f"{label}-g2", 1000.0), (f"{label}-g3", 2000.0)]:
+            for window_index, offset in enumerate([0.0, 2.0]):
+                rows.append(
+                    {
+                        "label": label,
+                        "device_id": "Motor-2" if label in {"正常", "松动", "轴承故障"} else "Motor-4",
+                        "speed_percent": 50 if label in {"正常", "松动", "轴承故障"} else 70,
+                        "rpm": 740.0 if label in {"正常", "松动", "轴承故障"} else 2070.0,
+                        "source_file": f"{label}.csv",
+                        "group_id": group_id,
+                        "window_id": f"{group_id}_{window_index}",
+                        "window_start": window_index * 1200,
+                        "window_end": window_index * 1200 + 2400,
+                        **{
+                            feature: (base if feature != REDRAW_FEATURE_COLUMNS[-1] else base / 1000.0) + offset
+                            for feature in REDRAW_FEATURE_COLUMNS
+                        },
+                    }
+                )
+    frame = pd.DataFrame(rows)
+
+    selected = select_representative_records(frame, REDRAW_FEATURE_COLUMNS)
+
+    assert list(selected) == CLASS_LAYOUT_ORDER
+    for label in CLASS_LAYOUT_ORDER:
+        assert selected[label]["group_id"] == f"{label}-g2"
+        assert selected[label]["window_count"] == 2
+        assert selected[label]["selection_method"].startswith("group_mean+robust")
+
+
+def test_validate_group_source_relationship_rejects_multiple_source_files_per_group() -> None:
+    frame = pd.DataFrame(
+        [
+            {"group_id": "g1", "source_file": "a.csv"},
+            {"group_id": "g1", "source_file": "b.csv"},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="multiple source_file values"):
+        validate_group_source_relationship(frame)
+
+
+def test_infer_windowing_from_frame_detects_current_feature_table_contract() -> None:
+    frame = pd.DataFrame(
+        {
+            "group_id": ["g1", "g1", "g1"],
+            "window_start": [0, 1200, 2400],
+            "window_end": [2400, 3600, 4800],
+        }
+    )
+
+    inferred = infer_windowing_from_frame(frame)
+
+    assert inferred["window_size"] == 2400
+    assert inferred["step_size"] == 1200
+
+
+def test_build_node_frequency_mapping_returns_freq_order_bands() -> None:
+    mapping = build_node_frequency_mapping(processed_fs=12_000, wavelet_level=3, wavelet="db6")
+
+    assert mapping.shape[0] == 8
+    assert mapping["frequency_order_node"].tolist() == list(range(8))
+    assert mapping["f_low"].tolist()[0] == 0.0
+    assert mapping["f_high"].tolist()[-1] == 6000.0
+    assert mapping["validated_dominant_node"].tolist() == list(range(8))

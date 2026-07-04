@@ -1,0 +1,2 @@
+﻿model,best_params,accuracy,balanced_accuracy,macro_precision,macro_recall,macro_f1,weighted_f1,group_majority_accuracy,group_majority_macro_f1,group_probability_accuracy,group_probability_macro_f1
+svm,"{'C': 10.0, 'kernel': 'rbf', 'gamma': 'scale', 'class_weight': 'balanced'}",0.9991801598688256,0.9988659383933811,0.9993381679091622,0.9988659383933811,0.9991013598565399,0.9991799659443164,1.0,1.0,1.0,1.0
