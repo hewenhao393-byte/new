@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Legacy unified six-class exploration script.
+
+This file is kept for historical comparison only. Its label order must not be
+used as the formal software output basis. The formal software contract is
+frozen by the V2 inference contract.
+"""
+
 import argparse
 import json
 import warnings

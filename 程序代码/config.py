@@ -6,6 +6,14 @@ from typing import Any
 
 from pump_diagnosis.labels import LABEL_ORDER
 
+"""Legacy experiment configuration.
+
+The defaults in this file are retained for historical experiment scripts.
+They are not the frozen formal inference contract for the six-class software.
+In particular, the 4096/2048 windowing and db4 wavelet defaults must not be
+used as the formal six-class inference settings.
+"""
+
 
 DATASET_ROOT = Path("/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集")
 CODE_ROOT = Path(__file__).resolve().parent
