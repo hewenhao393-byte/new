@@ -1,0 +1,75 @@
+{
+  "overall_status": "passed",
+  "items": [
+    {
+      "check_name": "formal_contract",
+      "status": "passed",
+      "message": "formal inference contract loaded"
+    },
+    {
+      "check_name": "formal_parameters",
+      "status": "passed",
+      "message": "12000 Hz, 10-5000 Hz, 2400/1200, db6, 2000-5000 Hz"
+    },
+    {
+      "check_name": "model_bundle_exists",
+      "status": "passed",
+      "message": "../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib"
+    },
+    {
+      "check_name": "model_bundle_contract",
+      "status": "passed",
+      "message": "bundle keys, labels, features and predict_proba validated"
+    },
+    {
+      "check_name": "dependency_numpy",
+      "status": "passed",
+      "message": "numpy import available"
+    },
+    {
+      "check_name": "dependency_pandas",
+      "status": "passed",
+      "message": "pandas import available"
+    },
+    {
+      "check_name": "dependency_scipy",
+      "status": "passed",
+      "message": "scipy import available"
+    },
+    {
+      "check_name": "dependency_joblib",
+      "status": "passed",
+      "message": "joblib import available"
+    },
+    {
+      "check_name": "dependency_streamlit",
+      "status": "passed",
+      "message": "streamlit import available"
+    },
+    {
+      "check_name": "word_dependency_docx",
+      "status": "passed",
+      "message": "docx import available"
+    },
+    {
+      "check_name": "word_dependency_matplotlib",
+      "status": "passed",
+      "message": "matplotlib import available"
+    },
+    {
+      "check_name": "cli_entrypoint",
+      "status": "passed",
+      "message": "CLI parser is callable"
+    },
+    {
+      "check_name": "demo_sample_config",
+      "status": "passed",
+      "message": "loaded 3 demo sample entries from configs/demo_samples.json"
+    },
+    {
+      "check_name": "demo_sample_minimal_diagnosis",
+      "status": "passed",
+      "message": "诊断完成"
+    }
+  ]
+}

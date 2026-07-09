@@ -1,0 +1,24 @@
+[passed] demo_name: pump_fault_app_defense_demo
+[passed] config_path: /Users/hewenhao/Documents/特征提取/程序代码/configs/demo_package.json
+[passed] required_file: /Users/hewenhao/Documents/特征提取/实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/configs/demo_samples.json
+[passed] required_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/README.md
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_usage.md
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_acceptance.md
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_demo_guide.md
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/scripts/run_pump_fault_demo.sh
+[passed] required_file: /Users/hewenhao/Documents/特征提取/程序代码/scripts/run_pump_fault_self_check.sh
+[passed] optional_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀2/振动_电机4_70_时域-出口汽蚀2-通道4.csv
+[passed] optional_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-2/100/泵轴承故障2/振动_电机2_100_时域-泵轴承故障2-通道4.csv
+[passed] optional_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_release_checklist.md
+[passed] optional_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_screenshot_checklist.md
+[passed] optional_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_thesis_figures.md
+[passed] optional_file: /Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_defense_checklist.md
+[passed] model_bundle_path: /Users/hewenhao/Documents/特征提取/实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib
+[passed] demo_sample_config_path: /Users/hewenhao/Documents/特征提取/程序代码/configs/demo_samples.json
+[passed] demo_sample_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv
+[passed] demo_sample_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀2/振动_电机4_70_时域-出口汽蚀2-通道4.csv
+[passed] demo_sample_file: /Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-2/100/泵轴承故障2/振动_电机2_100_时域-泵轴承故障2-通道4.csv
+[passed] screenshot_output_dir: /Users/hewenhao/Documents/特征提取/程序代码/demo_outputs/screenshots
+[passed] demo_package_summary: failures=0, warnings=0

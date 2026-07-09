@@ -200,3 +200,81 @@ class RecordPredictionResult:
             raise ValueError("record prediction must contain at least one window")
         if self.window_count != len(self.window_predictions):
             raise ValueError("window_count does not match window_predictions length")
+
+
+@dataclass(frozen=True)
+class TimeDomainSeries:
+    time_s: tuple[float, ...]
+    amplitude: tuple[float, ...]
+    sampling_rate_hz: int
+    point_count: int
+    downsampled_for_display: bool
+
+    def __post_init__(self) -> None:
+        if len(self.time_s) != len(self.amplitude):
+            raise ValueError("time axis and amplitude lengths must match")
+        if self.point_count != len(self.time_s):
+            raise ValueError("point_count does not match time axis length")
+        if self.sampling_rate_hz <= 0:
+            raise ValueError("sampling rate must be positive")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SpectrumSeries:
+    frequency_hz: tuple[float, ...]
+    amplitude: tuple[float, ...]
+    frequency_min_hz: float
+    frequency_max_hz: float
+    resolution_hz: float
+
+    def __post_init__(self) -> None:
+        if len(self.frequency_hz) != len(self.amplitude):
+            raise ValueError("frequency axis and amplitude lengths must match")
+        if self.frequency_max_hz < self.frequency_min_hz:
+            raise ValueError("frequency_max_hz must be greater than or equal to frequency_min_hz")
+        if self.resolution_hz < 0:
+            raise ValueError("resolution_hz must be non-negative")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class WaveletPacketEnergySeries:
+    band_labels: tuple[str, ...]
+    band_start_hz: tuple[float, ...]
+    band_end_hz: tuple[float, ...]
+    energy_ratio: tuple[float, ...]
+    wavelet: str
+    decomposition_level: int
+
+    def __post_init__(self) -> None:
+        counts = {len(self.band_labels), len(self.band_start_hz), len(self.band_end_hz), len(self.energy_ratio)}
+        if len(counts) != 1:
+            raise ValueError("wavelet packet band metadata lengths must match")
+        if self.decomposition_level <= 0:
+            raise ValueError("decomposition_level must be positive")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DiagnosisVisualizationData:
+    time_domain: TimeDomainSeries | None
+    frequency_spectrum: SpectrumSeries | None
+    envelope_spectrum: SpectrumSeries | None
+    wavelet_packet_energy: WaveletPacketEnergySeries | None
+    warnings: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "time_domain": None if self.time_domain is None else self.time_domain.as_dict(),
+            "frequency_spectrum": None if self.frequency_spectrum is None else self.frequency_spectrum.as_dict(),
+            "envelope_spectrum": None if self.envelope_spectrum is None else self.envelope_spectrum.as_dict(),
+            "wavelet_packet_energy": None if self.wavelet_packet_energy is None else self.wavelet_packet_energy.as_dict(),
+            "warnings": list(self.warnings),
+        }

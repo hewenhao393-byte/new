@@ -140,3 +140,35 @@ def test_cli_main_can_export_single_result_files(tmp_path: Path, capsys) -> None
     assert len(run_dirs) == 1
     assert (run_dirs[0] / "diagnosis_summary.json").exists()
     assert (run_dirs[0] / "diagnosis_summary.csv").exists()
+
+
+def test_cli_main_can_export_word_report(tmp_path: Path, capsys) -> None:
+    bundle_path = tmp_path / "bp_bundle.joblib"
+    _write_fake_bundle(bundle_path)
+
+    signal_path = tmp_path / "record.csv"
+    _write_signal_csv(signal_path, np.sin(2.0 * np.pi * 25.0 * np.arange(4800) / 12000.0))
+    report_path = tmp_path / "single_report.docx"
+
+    exit_code = main(
+        [
+            "--file",
+            str(signal_path),
+            "--sampling-rate",
+            "12000",
+            "--rpm",
+            "1500",
+            "--model-bundle",
+            str(bundle_path),
+            "--output-report",
+            str(report_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["success"] is True
+    assert report_path.exists()
+    assert report_path.stat().st_size > 0

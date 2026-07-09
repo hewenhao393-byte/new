@@ -5,9 +5,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from pump_fault_app.reporting import build_single_report_view_data
 from pump_fault_app.services import (
     AppBatchRunRequest,
     AppSingleRunRequest,
+    export_single_diagnosis_report,
     run_batch_diagnosis,
     run_single_diagnosis,
 )
@@ -35,6 +37,8 @@ def test_run_single_diagnosis_returns_summary_and_optional_export(tmp_path: Path
 
     assert result.summary.success is True
     assert result.summary.status == "diagnosed"
+    assert result.visualization is not None
+    assert result.visualization.time_domain is not None
     assert result.export_result is not None
     assert result.export_result.json_path.exists()
     assert result.export_result.csv_path.exists()
@@ -87,3 +91,38 @@ def test_run_batch_diagnosis_rejects_mixed_manifest_and_file_list(tmp_path: Path
         assert "exactly one of file_paths or manifest_path must be provided" in str(exc)
     else:
         raise AssertionError("expected mixed batch request to raise ValueError")
+
+
+def test_export_single_diagnosis_report_accepts_app_result_and_view_data(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bp_bundle.joblib"
+    _write_fake_bundle(bundle_path)
+    signal_path = tmp_path / "record.csv"
+    _write_signal_csv(signal_path, 0.8 * np.sin(2.0 * np.pi * 25.0 * np.arange(4800) / 12000.0))
+
+    result = run_single_diagnosis(
+        AppSingleRunRequest(
+            file_path=signal_path,
+            sampling_rate_hz=12000,
+            rpm=1500.0,
+            model_bundle_path=bundle_path,
+        )
+    )
+
+    first_path = export_single_diagnosis_report(result, tmp_path / "service_report.docx")
+    second_path = export_single_diagnosis_report(
+        build_single_report_view_data(result),
+        tmp_path / "service_report_from_view_data.docx",
+        format="docx",
+    )
+
+    assert first_path.exists()
+    assert second_path.exists()
+
+
+def test_export_single_diagnosis_report_rejects_unsupported_format(tmp_path: Path) -> None:
+    try:
+        export_single_diagnosis_report(object(), tmp_path / "report.pdf", format="pdf")
+    except ValueError as exc:
+        assert "only docx format is currently supported" in str(exc)
+    else:
+        raise AssertionError("expected unsupported export format to raise ValueError")

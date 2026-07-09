@@ -10,6 +10,7 @@ from pump_fault_app.batch import (
     run_batch_inference,
     run_batch_inference_from_manifest,
 )
+from pump_fault_app.domain.records import DiagnosisVisualizationData
 from pump_fault_app.export import (
     BatchExportResult,
     SummaryExportResult,
@@ -39,6 +40,7 @@ class AppSingleRunResult:
     inference_result: FormalInferenceResult
     summary: DiagnosisSummary
     export_result: SummaryExportResult | None
+    visualization: DiagnosisVisualizationData | None
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,7 @@ def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
         inference_result=inference_result,
         summary=summary,
         export_result=export_result,
+        visualization=inference_result.visualization,
     )
 
 

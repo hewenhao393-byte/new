@@ -118,6 +118,19 @@ def test_run_formal_inference_returns_record_level_prediction(tmp_path: Path) ->
     assert result.record_prediction.predicted_label == "转子不平衡"
     assert result.record_prediction.confidence == 0.40
     assert result.record_prediction.window_count == 3
+    assert result.visualization is not None
+    assert result.visualization.time_domain is not None
+    assert len(result.visualization.time_domain.time_s) == len(result.visualization.time_domain.amplitude)
+    assert result.visualization.time_domain.point_count <= 4000
+    assert result.visualization.frequency_spectrum is not None
+    assert len(result.visualization.frequency_spectrum.frequency_hz) == len(result.visualization.frequency_spectrum.amplitude)
+    assert result.visualization.frequency_spectrum.frequency_max_hz <= 5000.0
+    assert tuple(result.visualization.frequency_spectrum.frequency_hz) == tuple(sorted(result.visualization.frequency_spectrum.frequency_hz))
+    assert result.visualization.envelope_spectrum is not None
+    assert len(result.visualization.envelope_spectrum.frequency_hz) == len(result.visualization.envelope_spectrum.amplitude)
+    assert result.visualization.wavelet_packet_energy is not None
+    assert len(result.visualization.wavelet_packet_energy.band_labels) == len(result.visualization.wavelet_packet_energy.energy_ratio)
+    assert abs(sum(result.visualization.wavelet_packet_energy.energy_ratio) - 1.0) < 1e-6
 
 
 def test_run_formal_inference_returns_quality_failure_without_predictions(tmp_path: Path) -> None:
@@ -188,3 +201,36 @@ def test_run_formal_inference_collects_runtime_warnings(tmp_path: Path) -> None:
     assert result.success is True
     assert result.runtime_warnings
     assert "overflow encountered in matmul" in result.runtime_warnings[0]
+
+
+def test_run_formal_inference_visualization_failure_does_not_break_prediction(tmp_path: Path, monkeypatch) -> None:
+    bundle_path = tmp_path / "bp_bundle.joblib"
+    _write_fake_bundle(bundle_path)
+
+    samples = 0.8 * np.sin(2.0 * np.pi * 25.0 * np.arange(4800) / 12000.0)
+    signal_path = tmp_path / "record.csv"
+    _write_signal_csv(signal_path, samples)
+
+    def _broken_visualization(*args, **kwargs):
+        raise RuntimeError("visualization exploded")
+
+    monkeypatch.setattr("pump_fault_app.inference.service.build_diagnosis_visualization", _broken_visualization)
+
+    result = run_formal_inference(
+        FormalInferenceRequest(
+            file_path=signal_path,
+            sampling_rate_hz=12000,
+            rpm=1500.0,
+            model_bundle_path=bundle_path,
+        )
+    )
+
+    assert result.success is True
+    assert result.record_prediction is not None
+    assert result.visualization is not None
+    assert result.visualization.time_domain is None
+    assert result.visualization.frequency_spectrum is None
+    assert result.visualization.envelope_spectrum is None
+    assert result.visualization.wavelet_packet_energy is None
+    assert result.visualization.warnings
+    assert "visualization exploded" in result.visualization.warnings[0]

@@ -1,0 +1,14 @@
+{
+  "samples": [
+    {
+      "sample_name": "demo_normal_channel4",
+      "file_path": "/absolute/path/to/your/demo_signal.csv",
+      "sampling_rate": 12000,
+      "rpm": 1450.0,
+      "signal_column": "通道4",
+      "time_column": "time",
+      "expected_label": "正常",
+      "description": "用于答辩演示的单文件诊断样本，请替换为本机实际数据路径。"
+    }
+  ]
+}

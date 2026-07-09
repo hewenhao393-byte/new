@@ -5,6 +5,132 @@
 如果你想先看“这套代码每个模块是干什么的”，先看这份总说明：
 
 - [docs/pump_fault_app_walkthrough.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_walkthrough.md:1)
+- [docs/pump_fault_app_usage.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_usage.md:1)
+- [docs/pump_fault_app_acceptance.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_acceptance.md:1)
+- [docs/pump_fault_app_demo_guide.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_demo_guide.md:1)
+- [docs/pump_fault_app_release_checklist.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_release_checklist.md:1)
+- [docs/pump_fault_app_screenshot_checklist.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_screenshot_checklist.md:1)
+- [docs/pump_fault_app_thesis_figures.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_thesis_figures.md:1)
+- [docs/pump_fault_app_defense_checklist.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_defense_checklist.md:1)
+- [docs/pump_fault_app_demo_sample_selection.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_demo_sample_selection.md:1)
+- [docs/pump_fault_app_final_demo_assets.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_final_demo_assets.md:1)
+
+## 一键演示
+
+在 `程序代码/` 目录执行：
+
+```bash
+./scripts/run_pump_fault_demo.sh
+```
+
+脚本会：
+
+- 检查虚拟环境
+- 检查模型 bundle
+- 检查 demo sample 配置
+- 先执行 `self-check`
+- 启动现有 Streamlit 入口 `pump_fault_app/ui/streamlit_app.py`
+
+## 演示数据包配置
+
+演示交付建议再维护一份独立的 demo package 配置，示例文件：
+
+- `configs/demo_package.example.json`
+
+建议复制为：
+
+- `configs/demo_package.json`
+
+该配置用于统一检查：
+
+- 正式模型 bundle
+- demo sample 配置
+- 演示输出目录
+- 截图输出目录
+- README、使用说明、验收说明、演示指南和脚本等交付材料
+
+如果本地还没有实际配置，可先运行：
+
+```bash
+./scripts/init_pump_fault_demo_package.sh
+```
+
+它会自动生成：
+
+- `configs/demo_samples.json`
+- `configs/demo_package.json`
+
+## 演示数据包检查
+
+在 `程序代码/` 目录执行：
+
+```bash
+./scripts/check_pump_fault_demo_package.sh configs/demo_package.json
+```
+
+脚本会检查：
+
+- `required_files` 是否齐全
+- `optional_files` 是否存在
+- `demo_sample_config_path` 是否存在
+- demo sample 中 `file_path` 指向的振动文件是否存在
+- 截图输出目录是否已准备
+
+## 演示前推荐执行顺序
+
+```bash
+./scripts/init_pump_fault_demo_package.sh
+./scripts/run_pump_fault_self_check.sh
+./scripts/check_pump_fault_demo_package.sh configs/demo_package.json
+./scripts/run_pump_fault_demo.sh
+```
+
+## 当前主演示样本
+
+当前固定主演示样本为：
+
+- `Motor-4 / 70 / 汽蚀 / 出口汽蚀5`
+- 原始文件：`/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv`
+- 原始采样率：`20000 Hz`
+- 转速：`2070 rpm`
+- 固定读取：`signal_column="0"`，`time_column="time"`
+
+备用样本和筛选依据见：
+
+- `configs/demo_samples.json`
+- `docs/pump_fault_app_demo_sample_selection.md`
+
+当前主演示样本正式结果：
+
+- 期望类别：`汽蚀`
+- 预测类别：`汽蚀`
+- 综合置信度：接近 `1.0`
+- 概率差：接近 `1.0`
+- 窗口一致率：`1.0000`
+- 有效窗口数：`119`
+- visualization：四类图完整
+- Word 报告：可正常导出
+
+## 最终演示材料
+
+本轮已经固化的正式演示材料见：
+
+- `demo_outputs/screenshots/`
+- `demo_outputs/reports/primary_demo_report.docx`
+- `docs/pump_fault_app_screenshot_checklist.md`
+- `docs/pump_fault_app_final_demo_assets.md`
+
+其中：
+
+- 首页、单文件输入页、Word 报告截图、自检截图和 demo package 检查截图已生成
+- 单文件结果页和报告页有结果状态截图，需要在已启动的 Streamlit 界面中手动补截
+
+关于 `runtime_warnings=714` 的答辩话术建议：
+
+- 这是正式推理过程记录的运行时数值告警统计，不是界面额外生成的提示
+- 本次正式结果状态仍为 `diagnosed`
+- 预测类别、融合概率、窗口一致率、可视化和 Word 报告都已正常生成
+- 因此可解释为“结果可用，但建议结合工况与现场记录复核”
 
 ## 软件骨架
 
@@ -75,6 +201,7 @@
   - `汽蚀`
 
 旧实验脚本中的其他窗口参数、标签顺序和小波参数不能作为软件正式推理依据。
+旧训练脚本和探索脚本只作为实验追溯资料，不作为软件入口。
 
 ## Python 入口
 
@@ -155,6 +282,60 @@ print(batch_result)
 
 - `diagnosis_summary.json`
 - `diagnosis_summary.csv`
+
+如果需要同时导出 Word 报告，可附加：
+
+```bash
+../.venv/bin/python -m pump_fault_app.app.cli \
+  --file your_signal.csv \
+  --sampling-rate 12000 \
+  --rpm 1450 \
+  --output-report ./single_report.docx
+```
+
+## 系统自检
+
+在 `程序代码/` 目录执行：
+
+```bash
+../.venv/bin/python -m pump_fault_app.app.cli --self-check
+```
+
+如果你已经准备好了演示样本配置，可附加：
+
+```bash
+../.venv/bin/python -m pump_fault_app.app.cli \
+  --self-check \
+  --demo-config ./configs/demo_samples.json
+```
+
+演示样本配置示例见：
+
+- `configs/demo_samples.example.json`
+- `configs/demo_package.example.json`
+
+推荐先复制为：
+
+- `configs/demo_samples.json`
+- `configs/demo_package.json`
+
+再把其中的 `file_path` 改为你本机的实际振动样本路径。
+
+## 独立自检脚本
+
+在 `程序代码/` 目录执行：
+
+```bash
+./scripts/run_pump_fault_self_check.sh
+```
+
+如果要显式传入模型 bundle 和 demo config，也可以：
+
+```bash
+./scripts/run_pump_fault_self_check.sh \
+  ../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib \
+  ./configs/demo_samples.json
+```
 
 命令输出为 JSON：
 

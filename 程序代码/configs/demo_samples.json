@@ -1,0 +1,66 @@
+{
+  "primary_demo_sample": {
+    "sample_name": "demo_cavitation_motor4_70_channel0_primary",
+    "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv",
+    "sampling_rate": 20000,
+    "rpm": 2070.0,
+    "signal_column": "0",
+    "time_column": "time",
+    "expected_label": "汽蚀",
+    "description": "主演示样本。筛选自指定候选范围，在 warning_count 一致的前提下，置信度、概率差和窗口一致率均达到最优。"
+  },
+  "backup_demo_samples": [
+    {
+      "sample_name": "demo_cavitation_motor4_70_channel0_backup_current",
+      "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀2/振动_电机4_70_时域-出口汽蚀2-通道4.csv",
+      "sampling_rate": 20000,
+      "rpm": 2070.0,
+      "signal_column": "0",
+      "time_column": "time",
+      "expected_label": "汽蚀",
+      "description": "上一轮已验证可用的汽蚀备用样本，保留用于快速回退。"
+    },
+    {
+      "sample_name": "demo_bearing_motor2_100_channel0_backup",
+      "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-2/100/泵轴承故障2/振动_电机2_100_时域-泵轴承故障2-通道4.csv",
+      "sampling_rate": 20000,
+      "rpm": 1480.0,
+      "signal_column": "0",
+      "time_column": "time",
+      "expected_label": "轴承故障",
+      "description": "高置信度轴承故障备用样本，可在需要展示不同故障类型时使用。"
+    }
+  ],
+  "samples": [
+    {
+      "sample_name": "demo_cavitation_motor4_70_channel0_primary",
+      "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv",
+      "sampling_rate": 20000,
+      "rpm": 2070.0,
+      "signal_column": "0",
+      "time_column": "time",
+      "expected_label": "汽蚀",
+      "description": "主演示样本。筛选自指定候选范围，在 warning_count 一致的前提下，置信度、概率差和窗口一致率均达到最优。"
+    },
+    {
+      "sample_name": "demo_cavitation_motor4_70_channel0_backup_current",
+      "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀2/振动_电机4_70_时域-出口汽蚀2-通道4.csv",
+      "sampling_rate": 20000,
+      "rpm": 2070.0,
+      "signal_column": "0",
+      "time_column": "time",
+      "expected_label": "汽蚀",
+      "description": "上一轮已验证可用的汽蚀备用样本，保留用于快速回退。"
+    },
+    {
+      "sample_name": "demo_bearing_motor2_100_channel0_backup",
+      "file_path": "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-2/100/泵轴承故障2/振动_电机2_100_时域-泵轴承故障2-通道4.csv",
+      "sampling_rate": 20000,
+      "rpm": 1480.0,
+      "signal_column": "0",
+      "time_column": "time",
+      "expected_label": "轴承故障",
+      "description": "高置信度轴承故障备用样本，可在需要展示不同故障类型时使用。"
+    }
+  ]
+}

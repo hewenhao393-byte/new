@@ -5,6 +5,7 @@ from pathlib import Path
 import warnings
 
 from pump_fault_app.domain.records import (
+    DiagnosisVisualizationData,
     PreprocessedSignalRecord,
     RawSignalRecord,
     RecordPredictionResult,
@@ -14,6 +15,7 @@ from pump_fault_app.domain.records import (
 )
 from pump_fault_app.feature_extraction import extract_formal_features
 from pump_fault_app.fusion import fuse_window_predictions
+from pump_fault_app.inference.visualization import build_diagnosis_visualization
 from pump_fault_app.io import RawSignalReadError, RawSignalReadRequest, read_vibration_signal
 from pump_fault_app.prediction import load_formal_bp_bundle, predict_single_window
 from pump_fault_app.preprocessing import preprocess_raw_signal
@@ -44,6 +46,7 @@ class FormalInferenceResult:
     windowing_result: WindowingResult | None
     window_predictions: tuple[WindowPredictionResult, ...] | None
     record_prediction: RecordPredictionResult | None
+    visualization: DiagnosisVisualizationData | None
     runtime_warnings: tuple[str, ...] = ()
 
 
@@ -77,6 +80,7 @@ def run_formal_inference(request: FormalInferenceRequest) -> FormalInferenceResu
             windowing_result=None,
             window_predictions=None,
             record_prediction=None,
+            visualization=None,
             runtime_warnings=(),
         )
 
@@ -92,6 +96,7 @@ def run_formal_inference(request: FormalInferenceRequest) -> FormalInferenceResu
             windowing_result=None,
             window_predictions=None,
             record_prediction=None,
+            visualization=None,
             runtime_warnings=(),
         )
 
@@ -110,6 +115,20 @@ def run_formal_inference(request: FormalInferenceRequest) -> FormalInferenceResu
         source_file=raw_signal.source_file,
     )
     runtime_warnings = tuple(str(item.message) for item in caught_warnings)
+    try:
+        visualization = build_diagnosis_visualization(
+            raw_signal=raw_signal,
+            preprocessed_signal=preprocessed_signal,
+            window_predictions=window_predictions,
+        )
+    except Exception as exc:
+        visualization = DiagnosisVisualizationData(
+            time_domain=None,
+            frequency_spectrum=None,
+            envelope_spectrum=None,
+            wavelet_packet_energy=None,
+            warnings=(f"visualization generation failed: {exc}",),
+        )
     return FormalInferenceResult(
         success=True,
         failure_stage=None,
@@ -120,5 +139,6 @@ def run_formal_inference(request: FormalInferenceRequest) -> FormalInferenceResu
         windowing_result=windowing_result,
         window_predictions=window_predictions,
         record_prediction=record_prediction,
+        visualization=visualization,
         runtime_warnings=runtime_warnings,
     )

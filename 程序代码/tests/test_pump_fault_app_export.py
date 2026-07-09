@@ -8,6 +8,8 @@ import numpy as np
 
 from pump_fault_app.batch import BatchInferenceRequest, run_batch_inference
 from pump_fault_app.export import create_export_output_dir, export_batch_result
+from pump_fault_app.reporting import build_single_report_view_data, export_single_report_to_docx
+from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
 from tests.test_pump_fault_app_inference import _write_fake_bundle, _write_signal_csv
 
 
@@ -83,3 +85,25 @@ def test_create_export_output_dir_builds_timestamped_run_directory(tmp_path: Pat
 
     assert output_dir == tmp_path / "batch_run_20260707_120000"
     assert output_dir.is_dir()
+
+
+def test_word_export_entrypoint_is_streamlit_independent(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bp_bundle.joblib"
+    _write_fake_bundle(bundle_path)
+    signal_path = tmp_path / "record.csv"
+    _write_signal_csv(signal_path, 0.8 * np.sin(2.0 * np.pi * 25.0 * np.arange(4800) / 12000.0))
+
+    view_data = build_single_report_view_data(
+        run_single_diagnosis(
+            AppSingleRunRequest(
+                file_path=signal_path,
+                sampling_rate_hz=12000,
+                rpm=1500.0,
+                model_bundle_path=bundle_path,
+            )
+        )
+    )
+
+    output_path = export_single_report_to_docx(view_data, tmp_path / "report.docx")
+
+    assert output_path.exists()
