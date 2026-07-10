@@ -4,8 +4,10 @@ from pathlib import Path
 
 from pump_fault_app.app.bootstrap import bootstrap_application
 from pump_fault_app.config.defaults import FINAL_FEATURE_NAMES, SIX_CLASS_LABELS
+from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
 from pump_fault_app.config.loader import build_default_config
 from pump_fault_app.domain.features import FEATURE_GROUPS
+from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
 
 
 def test_default_config_uses_fixed_signal_parameters(tmp_path: Path) -> None:
@@ -65,3 +67,35 @@ def test_bootstrap_returns_summary_with_paths_and_feature_count(tmp_path: Path) 
     assert state.summary["target_sample_rate_hz"] == 12_000
     assert state.summary["log_directory"] == str(tmp_path / "runtime_logs")
     assert state.config.paths.runtime_root == tmp_path / "runtime_logs"
+
+
+def test_application_owned_contract_preserves_frozen_v2_values() -> None:
+    assert FORMAL_V2_CONTRACT.target_sampling_rate == 12_000
+    assert FORMAL_V2_CONTRACT.filter_low_hz == 10.0
+    assert FORMAL_V2_CONTRACT.filter_high_hz == 5000.0
+    assert FORMAL_V2_CONTRACT.window_size == 2400
+    assert FORMAL_V2_CONTRACT.step_size == 1200
+    assert FORMAL_V2_CONTRACT.feature_names == FINAL_FEATURE_NAMES
+    assert FORMAL_V2_CONTRACT.label_order == SIX_CLASS_LABELS
+
+
+def test_application_versions_are_non_empty() -> None:
+    assert APP_VERSION
+    assert MODEL_VERSION
+    assert FEATURE_VERSION
+    assert INFERENCE_CONTRACT_VERSION
+
+
+def test_architecture_document_describes_layers_and_frozen_contract() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    architecture_doc = project_root / "docs" / "pump_fault_app_architecture.md"
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+
+    text = architecture_doc.read_text(encoding="utf-8")
+    assert "UI层" in text
+    assert "Service层" in text
+    assert "Inference层" in text
+    assert "12000 Hz" in text
+    assert "2400/1200" in text
+    assert "db6" in text
+    assert "pump_fault_app_architecture.md" in readme

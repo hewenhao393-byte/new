@@ -4,12 +4,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from pump_diagnosis.inference_contract import (
+from pump_fault_app.domain.formal_contract import (
     FORMAL_LABEL_ORDER,
-    FORMAL_MODEL_VERSION,
-    FORMAL_SOFTWARE_VERSION,
     FORMAL_V2_CONTRACT,
 )
+from pump_fault_app.presentation.status import build_runtime_processing_status
+from pump_fault_app.version import APP_VERSION, MODEL_VERSION
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,12 @@ class SingleReportConclusion:
     diagnosis_advice: str
     warning_messages: tuple[str, ...]
 
-    def to_dict(self, *, second_probability: float | None = None) -> dict[str, str | float | None | list[str]]:
+    def to_dict(
+        self,
+        *,
+        second_probability: float | None = None,
+        runtime_alert_count: int = 0,
+    ) -> dict[str, str | float | int | None | list[str]]:
         confidence_value = _parse_decimal_text(self.top_probability)
         margin_value = _parse_decimal_text(self.probability_gap)
         consistency_value = _parse_percent_text(self.window_consistency)
@@ -109,6 +114,7 @@ class SingleReportConclusion:
             "diagnosis_level": self.diagnosis_grade,
             "suggestion": self.diagnosis_advice,
             "warnings": list(self.warning_messages),
+            "runtime_alert_count": int(runtime_alert_count),
         }
 
 
@@ -125,6 +131,7 @@ class SingleReportViewData:
     wavelet_packet_energy: Any | None
     quality_text: str
     summary_items: tuple[ReportKeyValueItem, ...]
+    runtime_alert_count: int
 
     def to_dict(self, *, include_visualization_data: bool = False) -> dict[str, Any]:
         second_probability = next(
@@ -133,7 +140,10 @@ class SingleReportViewData:
         )
         payload: dict[str, Any] = {
             "basic_info": [item.to_dict() for item in self.basic_info],
-            "conclusion": self.conclusion.to_dict(second_probability=second_probability),
+            "conclusion": self.conclusion.to_dict(
+                second_probability=second_probability,
+                runtime_alert_count=self.runtime_alert_count,
+            ),
             "class_probabilities": [item.to_dict() for item in self.probabilities],
             "window_distribution": [item.to_dict() for item in self.window_distribution],
             "visualization_availability": self.visualization_availability.to_dict(),
@@ -181,6 +191,7 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
     probability_gap = "-" if summary_confidence is None else f"{(top_probability - second_probability):.3f}"
     window_consistency = _compute_window_consistency(result)
 
+    runtime_alert_count = len(getattr(summary, "runtime_alerts", ()))
     return SingleReportViewData(
         basic_info=(
             ReportKeyValueItem("文件名", str(getattr(summary, "file_name", None) or "-")),
@@ -191,8 +202,8 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
             ReportKeyValueItem("转速", "-" if getattr(summary, "rpm", None) is None else f"{summary.rpm:.1f} rpm"),
             ReportKeyValueItem("信号时长", signal_duration),
             ReportKeyValueItem("窗口数量", "-" if getattr(summary, "window_count", None) is None else str(summary.window_count)),
-            ReportKeyValueItem("模型版本", FORMAL_MODEL_VERSION),
-            ReportKeyValueItem("软件版本", FORMAL_SOFTWARE_VERSION),
+            ReportKeyValueItem("模型版本", MODEL_VERSION),
+            ReportKeyValueItem("软件版本", APP_VERSION),
         ),
         conclusion=SingleReportConclusion(
             diagnosis_label=getattr(summary, "diagnosis_label", None) or "-",
@@ -216,8 +227,9 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
             ReportKeyValueItem("信号质量", quality_text),
             ReportKeyValueItem("窗口数量", "-" if getattr(summary, "window_count", None) is None else str(summary.window_count)),
             ReportKeyValueItem("关键输出", str(getattr(summary, "message", "-"))),
-            ReportKeyValueItem("运行告警数", str(len(getattr(summary, "runtime_alerts", ())))),
+            ReportKeyValueItem("处理状态", build_runtime_processing_status(runtime_alert_count)),
         ),
+        runtime_alert_count=runtime_alert_count,
     )
 
 

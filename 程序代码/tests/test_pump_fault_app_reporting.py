@@ -5,6 +5,7 @@ from pathlib import Path
 from pump_fault_app.inference import FormalInferenceRequest, run_formal_inference
 from pump_fault_app.reporting import build_diagnosis_summary, build_single_report_view_data, export_single_report_to_docx
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
+from pump_fault_app.version import APP_VERSION, MODEL_VERSION
 from tests.test_pump_fault_app_inference import (
     _write_fake_bundle,
     _write_signal_csv,
@@ -214,6 +215,31 @@ def test_build_single_report_view_data_contains_complete_sections(tmp_path: Path
     assert view_data.conclusion.probability_gap == "0.200"
     assert view_data.conclusion.window_consistency == "100.0%"
     assert len(view_data.summary_items) == 4
+    basic_info = {item.label: item.value for item in view_data.basic_info}
+    assert basic_info["模型版本"] == MODEL_VERSION
+    assert basic_info["软件版本"] == APP_VERSION
+
+
+def test_report_view_data_keeps_runtime_alert_count_without_promoting_it_to_summary(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "warning_bundle.joblib"
+    _write_warning_bundle(bundle_path)
+    signal_path = tmp_path / "record.csv"
+    _write_signal_csv(signal_path, 0.8 * np.sin(2.0 * np.pi * 25.0 * np.arange(4800) / 12000.0))
+
+    view_data = build_single_report_view_data(
+        run_single_diagnosis(
+            AppSingleRunRequest(
+                file_path=signal_path,
+                sampling_rate_hz=12000,
+                rpm=1500.0,
+                model_bundle_path=bundle_path,
+            )
+        )
+    )
+
+    assert view_data.runtime_alert_count > 0
+    assert {item.label for item in view_data.summary_items} >= {"处理状态"}
+    assert "运行告警数" not in {item.label for item in view_data.summary_items}
 
 
 def test_build_single_report_view_data_keeps_formal_probability_order(tmp_path: Path) -> None:

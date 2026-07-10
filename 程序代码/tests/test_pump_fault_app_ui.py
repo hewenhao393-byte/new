@@ -31,6 +31,7 @@ from pump_fault_app.ui.pages.single_diagnosis import (
     build_wavelet_packet_rows,
     get_single_advanced_field_labels,
 )
+from pump_fault_app.presentation.status import build_runtime_processing_status
 
 
 def test_build_single_run_request_returns_service_request(tmp_path: Path) -> None:
@@ -68,7 +69,7 @@ def test_build_probability_rows_returns_fixed_display_order() -> None:
     assert rows[3]["probability"] == 0.11
 
 
-def test_build_single_summary_items_contains_quality_window_and_runtime() -> None:
+def test_build_single_summary_items_uses_neutral_processing_status_for_runtime_alerts() -> None:
     items = build_single_summary_items(
         quality_text="pass",
         window_count=3,
@@ -81,7 +82,21 @@ def test_build_single_summary_items_contains_quality_window_and_runtime() -> Non
     assert items["窗口数量"] == "3"
     assert items["推理耗时"] == "0.234 s"
     assert items["关键输出"] == "诊断完成"
-    assert items["运行告警数"] == "1"
+    assert items["处理状态"] == "已完成数值稳定性保护处理，不影响诊断结果。"
+    assert "运行告警数" not in items
+
+
+def test_build_runtime_processing_status_is_neutral_but_preserves_detail_signal() -> None:
+    assert build_runtime_processing_status(0) == "诊断流程正常完成。"
+    assert build_runtime_processing_status(714) == "已完成数值稳定性保护处理，不影响诊断结果。"
+
+
+def test_report_view_uses_presentation_adapters_instead_of_page_helpers() -> None:
+    report_view = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "pages" / "report_view.py"
+    text = report_view.read_text(encoding="utf-8")
+
+    assert "pump_fault_app.presentation.single_diagnosis" in text
+    assert "from pump_fault_app.ui.pages.single_diagnosis import" not in text
 
 
 def test_build_batch_requests_return_service_request(tmp_path: Path) -> None:

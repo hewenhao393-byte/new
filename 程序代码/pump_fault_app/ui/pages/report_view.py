@@ -8,13 +8,13 @@ import pandas as pd
 
 from pump_fault_app.reporting import build_single_report_view_data
 from pump_fault_app.services import AppBatchRunResult, AppSingleRunResult, export_single_diagnosis_report
-from pump_fault_app.ui.pages.batch_diagnosis import build_batch_table_rows
-from pump_fault_app.ui.pages.single_diagnosis import (
+from pump_fault_app.presentation.single_diagnosis import (
     build_spectrum_rows,
     build_structured_summary_rows,
     build_time_domain_rows,
     build_wavelet_packet_rows,
 )
+from pump_fault_app.ui.pages.batch_diagnosis import build_batch_table_rows
 from pump_fault_app.ui.streamlit_app import APP_SUBTITLE, APP_TITLE
 
 

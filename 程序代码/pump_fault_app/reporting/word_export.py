@@ -12,7 +12,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-from pump_diagnosis.inference_contract import FORMAL_MODEL_VERSION, FORMAL_SOFTWARE_VERSION
+from pump_fault_app.version import APP_VERSION, MODEL_VERSION
 
 from pump_fault_app.reporting.view_data import SingleReportViewData
 
@@ -92,7 +92,7 @@ def _add_conclusion(document: Document, view_data: SingleReportViewData) -> None
             run.bold = True
     warnings = conclusion["warnings"]
     if warnings:
-        document.add_paragraph("警告信息：")
+        document.add_paragraph(f"详细告警信息（{view_data.runtime_alert_count} 条）：")
         for warning in warnings:
             document.add_paragraph(str(warning), style="List Bullet")
 
@@ -261,8 +261,8 @@ def _add_generation_metadata(document: Document) -> None:
     table.rows[0].cells[1].text = "内容"
     rows = [
         ("生成时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        ("模型版本", FORMAL_MODEL_VERSION),
-        ("软件版本", FORMAL_SOFTWARE_VERSION),
+        ("模型版本", MODEL_VERSION),
+        ("软件版本", APP_VERSION),
     ]
     for label, value in rows:
         row = table.add_row().cells

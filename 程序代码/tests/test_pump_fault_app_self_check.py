@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pump_fault_app.app.cli import main
 from pump_fault_app.app.self_check import load_demo_sample_config, run_system_self_check
+from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
 from tests.test_pump_fault_app_inference import _write_fake_bundle, _write_signal_csv
 
 
@@ -57,6 +58,20 @@ def test_run_system_self_check_reports_missing_bundle_as_failed(tmp_path: Path) 
     bundle_item = next(item for item in payload["items"] if item["check_name"] == "model_bundle_exists")
     assert bundle_item["status"] == "failed"
     assert "missing" in bundle_item["message"].lower()
+
+
+def test_run_system_self_check_reports_centralized_versions(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bp_bundle.joblib"
+    _write_fake_bundle(bundle_path)
+
+    payload = run_system_self_check(demo_config_path=tmp_path / "missing_demo.json", model_bundle_path=bundle_path)
+
+    version_item = next(item for item in payload["items"] if item["check_name"] == "version_information")
+    assert version_item["status"] == "passed"
+    assert APP_VERSION in version_item["message"]
+    assert MODEL_VERSION in version_item["message"]
+    assert FEATURE_VERSION in version_item["message"]
+    assert INFERENCE_CONTRACT_VERSION in version_item["message"]
 
 
 def test_run_system_self_check_can_run_minimal_demo_diagnosis(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pump_diagnosis.inference_contract import FORMAL_LABEL_ORDER, validate_model_bundle
+from pump_fault_app.domain.formal_contract import FORMAL_LABEL_ORDER, validate_model_bundle
 from pump_fault_app.domain.records import FeatureVector, WindowPredictionResult
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pump_diagnosis.inference_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
 from pump_fault_app.domain.records import PreprocessedSignalRecord, SignalWindow, WindowingResult
 
 

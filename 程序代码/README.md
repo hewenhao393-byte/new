@@ -14,6 +14,7 @@
 - [docs/pump_fault_app_defense_checklist.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_defense_checklist.md:1)
 - [docs/pump_fault_app_demo_sample_selection.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_demo_sample_selection.md:1)
 - [docs/pump_fault_app_final_demo_assets.md](/Users/hewenhao/Documents/特征提取/程序代码/docs/pump_fault_app_final_demo_assets.md:1)
+- [docs/pump_fault_app_architecture.md](docs/pump_fault_app_architecture.md)
 
 ## 一键演示
 
@@ -184,7 +185,7 @@
 
 ## 正式推理契约
 
-软件正式推理只允许使用 `pump_diagnosis/inference_contract.py` 中冻结的 V2 契约：
+软件正式推理只允许使用 `pump_fault_app/domain/formal_contract.py` 中冻结的 V2 契约：
 
 - 目标采样率：`12000 Hz`
 - 带通范围：`10~5000 Hz`
@@ -202,6 +203,9 @@
 
 旧实验脚本中的其他窗口参数、标签顺序和小波参数不能作为软件正式推理依据。
 旧训练脚本和探索脚本只作为实验追溯资料，不作为软件入口。
+
+软件、模型、特征和推理契约版本统一定义在 `pump_fault_app/version.py`；
+`pump_diagnosis/inference_contract.py` 仅保留为旧实验脚本的兼容导入入口。
 
 ## Python 入口
 

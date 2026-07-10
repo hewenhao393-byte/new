@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pump_diagnosis.inference_contract import (
+from pump_fault_app.domain.formal_contract import (
     FORMAL_LABEL_ORDER,
     FORMAL_MODEL_BUNDLE_PATH,
     FORMAL_V2_CONTRACT,
@@ -15,6 +15,7 @@ from pump_diagnosis.inference_contract import (
     validate_model_bundle,
 )
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
+from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
 
 DEFAULT_DEMO_CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "demo_samples.json"
 DEMO_CONFIG_ENV_VAR = "PUMP_FAULT_APP_DEMO_CONFIG"
@@ -46,6 +47,15 @@ def run_system_self_check(
     items: list[dict[str, str]] = []
 
     _record(items, "formal_contract", "passed", "formal inference contract loaded")
+    _record(
+        items,
+        "version_information",
+        "passed",
+        (
+            f"app={APP_VERSION}; model={MODEL_VERSION}; "
+            f"features={FEATURE_VERSION}; contract={INFERENCE_CONTRACT_VERSION}"
+        ),
+    )
     try:
         FORMAL_V2_CONTRACT.validate()
         validate_feature_names(FORMAL_V2_CONTRACT.feature_names)
