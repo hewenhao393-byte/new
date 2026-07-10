@@ -54,7 +54,7 @@ FORMAL_FEATURE_NAMES = (
 
 FORMAL_BUNDLE_KEYS = {"imputer", "scaler", "model", "features"}
 FORMAL_MODEL_BUNDLE_PATH = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "实验结果"
     / "多转速统一六分类实验V2"
     / "six_class_models"

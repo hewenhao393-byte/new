@@ -5,6 +5,7 @@ from pathlib import Path
 from pump_fault_app.app.bootstrap import bootstrap_application
 from pump_fault_app.config.defaults import FINAL_FEATURE_NAMES, SIX_CLASS_LABELS
 from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_MODEL_BUNDLE_PATH
 from pump_fault_app.config.loader import build_default_config
 from pump_fault_app.domain.features import FEATURE_GROUPS
 from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
@@ -84,6 +85,20 @@ def test_application_versions_are_non_empty() -> None:
     assert MODEL_VERSION
     assert FEATURE_VERSION
     assert INFERENCE_CONTRACT_VERSION
+
+
+def test_application_contract_resolves_model_bundle_from_project_root() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    expected_path = (
+        project_root
+        / "实验结果"
+        / "多转速统一六分类实验V2"
+        / "six_class_models"
+        / "bp"
+        / "bp_bundle.joblib"
+    )
+
+    assert FORMAL_MODEL_BUNDLE_PATH == expected_path
 
 
 def test_architecture_document_describes_layers_and_frozen_contract() -> None:
