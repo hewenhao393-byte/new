@@ -124,7 +124,7 @@ def _st():
     return st
 
 
-def render_home_page() -> None:
+def render_home_page(single_page: Any) -> None:
     st = _st()
     sections = build_home_sections()
     st.title(sections["title"])
@@ -154,16 +154,36 @@ def render_home_page() -> None:
             )
 
     if st.button("开始单文件诊断", type="primary", use_container_width=True):
-        st.switch_page("pump_fault_app/ui/pages/single_diagnosis.py")
+        st.switch_page(single_page)
 
 
 def main() -> None:
     st = _st()
     st.set_page_config(page_title=APP_TITLE, page_icon="🔧", layout="wide", initial_sidebar_state="expanded")
     st.markdown(build_global_style(), unsafe_allow_html=True)
+    items = build_navigation_items()
+    item_by_path = {item["url_path"]: item for item in items}
+    single_item = item_by_path["single"]
+    single_page = st.Page(
+        single_item["callable"],
+        title=single_item["title"],
+        icon=single_item["icon"],
+        url_path=single_item["url_path"],
+    )
     pages = [
-        st.Page(item["callable"], title=item["title"], icon=item["icon"], url_path=item["url_path"])
-        for item in build_navigation_items()
+        st.Page(
+            lambda: render_home_page(single_page),
+            title=item_by_path["home"]["title"],
+            icon=item_by_path["home"]["icon"],
+            url_path=item_by_path["home"]["url_path"],
+            default=True,
+        ),
+        single_page,
+        *(
+            st.Page(item["callable"], title=item["title"], icon=item["icon"], url_path=item["url_path"])
+            for item in items
+            if item["url_path"] not in {"home", "single"}
+        ),
     ]
     navigation = st.navigation(pages, position="sidebar")
     navigation.run()

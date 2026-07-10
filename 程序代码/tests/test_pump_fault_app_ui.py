@@ -161,6 +161,14 @@ def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> No
     ]
 
 
+def test_home_page_cta_switches_to_the_registered_navigation_page() -> None:
+    app_path = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "streamlit_app.py"
+    text = app_path.read_text(encoding="utf-8")
+
+    assert "st.switch_page(single_page)" in text
+    assert "st.switch_page(\"pump_fault_app/ui/pages/single_diagnosis.py\")" not in text
+
+
 def test_ui_modules_only_depend_on_services_layer() -> None:
     root = Path("/Users/hewenhao/Documents/特征提取/程序代码/pump_fault_app/ui")
     forbidden = (
