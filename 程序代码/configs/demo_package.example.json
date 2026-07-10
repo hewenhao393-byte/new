@@ -1,0 +1,27 @@
+{
+  "demo_name": "pump_fault_app_defense_demo",
+  "description": "水泵六分类故障诊断软件答辩演示数据包示例配置，请复制为 demo_package.json 后按本机路径修改。",
+  "model_bundle_path": "../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib",
+  "demo_sample_config_path": "./configs/demo_samples.json",
+  "expected_ui_entry": "pump_fault_app/ui/streamlit_app.py",
+  "expected_cli_entry": "pump_fault_app.app.cli",
+  "expected_output_dir": "./demo_outputs",
+  "expected_report_name": "single_report.docx",
+  "required_files": [
+    "../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib",
+    "./configs/demo_samples.json",
+    "./README.md",
+    "./docs/pump_fault_app_usage.md",
+    "./docs/pump_fault_app_acceptance.md",
+    "./docs/pump_fault_app_demo_guide.md",
+    "./scripts/run_pump_fault_demo.sh",
+    "./scripts/run_pump_fault_self_check.sh"
+  ],
+  "optional_files": [
+    "./docs/pump_fault_app_release_checklist.md",
+    "./docs/pump_fault_app_screenshot_checklist.md",
+    "./docs/pump_fault_app_thesis_figures.md",
+    "./docs/pump_fault_app_defense_checklist.md"
+  ],
+  "screenshot_output_dir": "./demo_outputs/screenshots"
+}

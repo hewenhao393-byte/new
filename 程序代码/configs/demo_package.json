@@ -1,0 +1,35 @@
+{
+  "demo_name": "pump_fault_app_defense_demo",
+  "description": "水泵六分类故障诊断软件本地答辩演示数据包配置。",
+  "primary_demo_sample_name": "demo_cavitation_motor4_70_channel0_primary",
+  "backup_demo_sample_names": [
+    "demo_cavitation_motor4_70_channel0_backup_current",
+    "demo_bearing_motor2_100_channel0_backup"
+  ],
+  "model_bundle_path": "../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib",
+  "demo_sample_config_path": "./configs/demo_samples.json",
+  "expected_ui_entry": "pump_fault_app/ui/streamlit_app.py",
+  "expected_cli_entry": "pump_fault_app.app.cli",
+  "expected_output_dir": "./demo_outputs",
+  "expected_report_name": "single_report.docx",
+  "required_files": [
+    "../实验结果/多转速统一六分类实验V2/six_class_models/bp/bp_bundle.joblib",
+    "./configs/demo_samples.json",
+    "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀5/振动_电机4_70_时域-出口汽蚀5-通道4.csv",
+    "./README.md",
+    "./docs/pump_fault_app_usage.md",
+    "./docs/pump_fault_app_acceptance.md",
+    "./docs/pump_fault_app_demo_guide.md",
+    "./scripts/run_pump_fault_demo.sh",
+    "./scripts/run_pump_fault_self_check.sh"
+  ],
+  "optional_files": [
+    "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-4/70/出口汽蚀2/振动_电机4_70_时域-出口汽蚀2-通道4.csv",
+    "/Users/hewenhao/Documents/电机驱动离心泵多故障电流与振动监测数据集/数据集/原始数据集/Vibration/Motor-2/100/泵轴承故障2/振动_电机2_100_时域-泵轴承故障2-通道4.csv",
+    "./docs/pump_fault_app_release_checklist.md",
+    "./docs/pump_fault_app_screenshot_checklist.md",
+    "./docs/pump_fault_app_thesis_figures.md",
+    "./docs/pump_fault_app_defense_checklist.md"
+  ],
+  "screenshot_output_dir": "./demo_outputs/screenshots"
+}
