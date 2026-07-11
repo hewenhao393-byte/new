@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 from pump_fault_app.domain.records import DiagnosisVisualizationData, SpectrumSeries, TimeDomainSeries, WaveletPacketEnergySeries
 from pump_fault_app.reporting import build_single_report_view_data
@@ -232,6 +234,19 @@ def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> No
         "批量诊断",
         "诊断结果",
     ]
+
+
+def test_streamlit_app_imports_without_circular_page_dependency() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, "-c", "import pump_fault_app.ui.streamlit_app"],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_batch_display_helpers_are_owned_by_presentation_layer() -> None:

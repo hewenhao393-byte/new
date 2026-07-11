@@ -17,7 +17,7 @@ from pump_fault_app.presentation.single_diagnosis import (
 )
 from pump_fault_app.presentation.batch_diagnosis import build_batch_table_rows
 from pump_fault_app.presentation.report_view import build_diagnosis_highlight
-from pump_fault_app.ui.streamlit_app import APP_SUBTITLE, APP_TITLE
+from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE
 
 
 def build_report_empty_message() -> str:

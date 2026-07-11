@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE
 from pump_fault_app.ui.pages import batch_diagnosis, report_view, single_diagnosis
-
-APP_TITLE = "水泵智能故障诊断系统"
-APP_SUBTITLE = "基于振动信号与机器学习的六分类故障识别"
 
 
 def build_home_sections() -> dict[str, Any]:
