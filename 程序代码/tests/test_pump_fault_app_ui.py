@@ -268,6 +268,15 @@ def test_home_page_cta_switches_to_the_registered_navigation_page() -> None:
     assert "st.switch_page(\"pump_fault_app/ui/pages/single_diagnosis.py\")" not in text
 
 
+def test_top_navigation_is_rendered_outside_the_collapsible_sidebar() -> None:
+    app_path = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "streamlit_app.py"
+    text = app_path.read_text(encoding="utf-8")
+
+    assert "def render_top_navigation" in text
+    assert "render_top_navigation(st, page_by_path)" in text
+    assert "key=f'top-nav-" in text
+
+
 def test_ui_modules_only_depend_on_services_layer() -> None:
     root = Path("/Users/hewenhao/Documents/特征提取/程序代码/pump_fault_app/ui")
     forbidden = (

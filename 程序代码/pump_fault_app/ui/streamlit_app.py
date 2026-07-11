@@ -163,6 +163,7 @@ def build_global_style() -> str:
     .section-intro { color: #668095; margin-top: -0.25rem; margin-bottom: 0.75rem; }
     .input-note { color: #557187; background: #f4f9fc; border-left: 3px solid #4b86ad; padding: 0.65rem 0.8rem; border-radius: 6px; }
     .task-stat-caption { color: #61798c; font-size: 0.84rem; }
+    .top-navigation-label { color: #6b8396; font-size: 0.78rem; font-weight: 700; margin: 0.1rem 0 0.35rem; }
     div[data-testid="stMetric"] { box-shadow: 0 2px 8px rgba(26, 70, 99, 0.04); }
     @media (max-width: 800px) {
       .home-hero { padding: 1rem; }
@@ -223,6 +224,20 @@ def render_home_page(single_page: Any) -> None:
         st.switch_page(single_page)
 
 
+def render_top_navigation(st: Any, page_by_path: dict[str, Any]) -> None:
+    st.markdown('<div class="top-navigation-label">系统导航</div>', unsafe_allow_html=True)
+    items = build_navigation_items()
+    columns = st.columns(len(items), gap="small")
+    for column, item in zip(columns, items):
+        with column:
+            if st.button(
+                f'{item["icon"]} {item["title"]}',
+                key=f'top-nav-{item["url_path"]}',
+                use_container_width=True,
+            ):
+                st.switch_page(page_by_path[item["url_path"]])
+
+
 def main() -> None:
     st = _st()
     st.set_page_config(page_title=APP_TITLE, page_icon="🔧", layout="wide", initial_sidebar_state="expanded")
@@ -236,22 +251,29 @@ def main() -> None:
         icon=single_item["icon"],
         url_path=single_item["url_path"],
     )
-    pages = [
-        st.Page(
+    page_by_path = {
+        "home": st.Page(
             lambda: render_home_page(single_page),
             title=item_by_path["home"]["title"],
             icon=item_by_path["home"]["icon"],
             url_path=item_by_path["home"]["url_path"],
             default=True,
         ),
-        single_page,
-        *(
-            st.Page(item["callable"], title=item["title"], icon=item["icon"], url_path=item["url_path"])
+        "single": single_page,
+        **{
+            item["url_path"]: st.Page(
+                item["callable"],
+                title=item["title"],
+                icon=item["icon"],
+                url_path=item["url_path"],
+            )
             for item in items
             if item["url_path"] not in {"home", "single"}
-        ),
-    ]
+        },
+    }
+    pages = [page_by_path[item["url_path"]] for item in items]
     navigation = st.navigation(pages, position="sidebar")
+    render_top_navigation(st, page_by_path)
     navigation.run()
 
 
