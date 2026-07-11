@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,8 @@ from pump_fault_app.presentation.single_diagnosis import (
     build_time_domain_rows,
     build_wavelet_packet_rows,
 )
-from pump_fault_app.ui.pages.batch_diagnosis import build_batch_table_rows
+from pump_fault_app.presentation.batch_diagnosis import build_batch_table_rows
+from pump_fault_app.presentation.report_view import build_diagnosis_highlight
 from pump_fault_app.ui.streamlit_app import APP_SUBTITLE, APP_TITLE
 
 
@@ -85,9 +87,27 @@ def _render_bar_chart(st: Any, frame: pd.DataFrame, *, x_field: str, y_field: st
     st.altair_chart(chart, use_container_width=True)
 
 
+def _render_diagnosis_highlight(st: Any, *, label: str | None, confidence: str, grade: str | None) -> None:
+    highlight = build_diagnosis_highlight(label, confidence, grade)
+    st.markdown(
+        f'<div class="diagnosis-highlight {highlight["tone"]}">'
+        '<div class="label">最终诊断</div>'
+        f'<div class="result">{escape(highlight["label"])}</div>'
+        f'<div class="meta">置信度：{escape(highlight["confidence"])} &nbsp;&nbsp; 诊断状态：{escape(highlight["status"])} &nbsp;&nbsp; 诊断等级：{escape(highlight["grade"])}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
     summary = result.summary
     view_data = build_single_report_view_data(result)
+    _render_diagnosis_highlight(
+        st,
+        label=view_data.conclusion.diagnosis_label,
+        confidence=view_data.conclusion.top_probability,
+        grade=view_data.conclusion.diagnosis_grade,
+    )
     visual_rows = {
         "time_domain": None if view_data.time_domain is None else build_time_domain_rows(view_data.time_domain),
         "frequency_spectrum": None if view_data.frequency_spectrum is None else build_spectrum_rows(view_data.frequency_spectrum),
@@ -298,7 +318,7 @@ def main() -> None:
         st.session_state.get("batch_run_result"),
         st.session_state.get("latest_result_kind"),
     )
-    st.title("诊断报告")
+    st.title("诊断结果")
     st.caption(overview["subtitle"])
 
     if overview["active_kind"] is None:

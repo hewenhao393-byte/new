@@ -46,6 +46,36 @@ def build_single_summary_items(
     }
 
 
+def build_upload_signal_info(
+    *,
+    file_name: str,
+    file_size_bytes: int | None,
+    sampling_rate_hz: int,
+    rpm: float,
+    signal_column: str | None,
+    time_column: str | None,
+    measurement_position: str | None,
+) -> list[dict[str, str]]:
+    size_text = "-" if file_size_bytes is None else _format_file_size(file_size_bytes)
+    return [
+        {"项目": "文件名称", "内容": file_name},
+        {"项目": "文件大小", "内容": size_text},
+        {"项目": "输入采样率", "内容": f"{sampling_rate_hz} Hz"},
+        {"项目": "转速", "内容": f"{rpm:.1f} rpm"},
+        {"项目": "信号列", "内容": signal_column or "自动识别"},
+        {"项目": "时间列", "内容": time_column or "自动识别"},
+        {"项目": "测点位置", "内容": measurement_position or "未填写"},
+    ]
+
+
+def _format_file_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
 def build_single_visual_availability(result: Any) -> dict[str, bool]:
     inference_result = result.inference_result
     summary = result.summary

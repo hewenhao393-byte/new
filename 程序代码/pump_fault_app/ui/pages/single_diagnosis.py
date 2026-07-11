@@ -11,6 +11,7 @@ import pandas as pd
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
 from pump_fault_app.presentation.single_diagnosis import (
     build_probability_rows,
+    build_upload_signal_info,
     build_single_summary_items,
     build_single_visual_availability,
     build_spectrum_rows,
@@ -181,6 +182,10 @@ def main() -> None:
     st.caption("上传一条振动记录并调用统一诊断服务完成正式六分类判断。")
 
     uploaded_file = st.file_uploader("振动数据文件", type=["csv", "txt", "wav"])
+    st.markdown(
+        '<div class="input-note">输入信号采样率可不同于模型标准采样率，系统会在正式推理中自动完成重采样处理。</div>',
+        unsafe_allow_html=True,
+    )
     col1, col2 = st.columns(2)
     with col1:
         sampling_rate_hz = int(st.number_input("采样率 Hz", min_value=1, value=12000, step=100))
@@ -193,6 +198,22 @@ def main() -> None:
         device_id = st.text_input(labels["device_id"], value="")
         measurement_position = st.text_input(labels["measurement_position"], value="")
         export_enabled = st.checkbox(labels["export"], value=True, help="勾选后生成可下载的 JSON/CSV 结果文件。")
+
+    if uploaded_file is not None:
+        st.subheader("信号文件信息")
+        st.dataframe(
+            build_upload_signal_info(
+                file_name=uploaded_file.name,
+                file_size_bytes=getattr(uploaded_file, "size", None),
+                sampling_rate_hz=sampling_rate_hz,
+                rpm=rpm,
+                signal_column=signal_column,
+                time_column=time_column,
+                measurement_position=measurement_position,
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     if st.button("开始诊断", type="primary", use_container_width=True):
         if uploaded_file is None:

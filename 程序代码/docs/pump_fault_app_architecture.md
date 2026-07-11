@@ -26,7 +26,7 @@ Reporting、可视化与 Word 报告
 
 ### UI层
 
-`pump_fault_app/ui/` 负责用户输入、页面布局和已有结果展示。它只调用 `pump_fault_app.services`，不会重新读取原始文件或执行 FFT、包络、小波包及模型推理。
+`pump_fault_app/ui/` 负责用户输入、页面布局和已有结果展示。首页展示六类识别能力、正式参数和研究流程；单文件页展示上传文件元信息；批量页展示已有任务的统计结果；诊断结果页突出最终结论。它只调用 `pump_fault_app.services`，不会重新读取原始文件或执行 FFT、包络、小波包及模型推理。
 
 ### Service层
 
@@ -42,7 +42,7 @@ Reporting、可视化与 Word 报告
 
 ### Presentation层
 
-`pump_fault_app/presentation/` 仅做页面所需的表格行、图表行和状态文本适配，不计算新的诊断指标，也不修改 service 返回结果。
+`pump_fault_app/presentation/` 仅做页面所需的表格行、图表行、任务统计和状态文本适配，不计算新的诊断指标，也不修改 service 返回结果。正常、故障和待复测的颜色仅用于展示层级，不会改变模型输出或诊断状态。
 
 ### Tests
 
