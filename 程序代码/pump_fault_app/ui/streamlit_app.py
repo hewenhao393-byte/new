@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE, build_research_style
 from pump_fault_app.ui.pages import batch_diagnosis, report_view, single_diagnosis
-
-APP_TITLE = "水泵智能故障诊断系统"
-APP_SUBTITLE = "基于振动信号与机器学习的六分类故障识别"
 
 
 def build_home_sections() -> dict[str, Any]:
@@ -20,13 +18,21 @@ def build_home_sections() -> dict[str, Any]:
             "轴承故障",
             "汽蚀",
         ),
+        "fault_cards": (
+            {"title": "正常状态", "description": "稳定运行参考状态", "tone": "normal"},
+            {"title": "转子不平衡", "description": "转频能量异常", "tone": "fault"},
+            {"title": "联轴器不对中", "description": "倍频结构偏移", "tone": "fault"},
+            {"title": "机械松动", "description": "连接刚度变化", "tone": "warning"},
+            {"title": "轴承故障", "description": "冲击与调制特征", "tone": "fault"},
+            {"title": "汽蚀", "description": "宽带水力扰动", "tone": "fault"},
+        ),
         "pipeline": (
-            "文件上传",
-            "信号质量检查",
-            "预处理",
+            "振动信号输入",
+            "信号预处理",
             "特征提取",
-            "BP模型推理",
-            "诊断报告",
+            "BP神经网络",
+            "六分类故障识别",
+            "诊断报告输出",
         ),
         "parameters": {
             "默认采样率": "12000 Hz",
@@ -39,83 +45,15 @@ def build_home_sections() -> dict[str, Any]:
 
 def build_navigation_items() -> list[dict[str, Any]]:
     return [
-        {"title": "系统首页", "icon": "🏠", "callable": render_home_page, "url_path": "home"},
-        {"title": "单文件诊断", "icon": "📈", "callable": single_diagnosis.main, "url_path": "single"},
-        {"title": "批量诊断", "icon": "🗂️", "callable": batch_diagnosis.main, "url_path": "batch"},
-        {"title": "诊断报告", "icon": "📄", "callable": report_view.main, "url_path": "report"},
+        {"title": "系统首页", "nav_label": "01 系统首页", "icon": None, "callable": render_home_page, "url_path": "home"},
+        {"title": "单文件诊断", "nav_label": "02 单文件诊断", "icon": None, "callable": single_diagnosis.main, "url_path": "single"},
+        {"title": "批量诊断", "nav_label": "03 批量诊断", "icon": None, "callable": batch_diagnosis.main, "url_path": "batch"},
+        {"title": "诊断结果", "nav_label": "04 诊断结果", "icon": None, "callable": report_view.main, "url_path": "report"},
     ]
 
 
 def build_global_style() -> str:
-    return """
-    <style>
-    #MainMenu, footer, header[data-testid="stHeader"] [data-testid="stToolbar"], [data-testid="stDecoration"] {
-      visibility: hidden;
-    }
-    .stApp {
-      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      color: #14324a;
-    }
-    .block-container {
-      max-width: 1200px;
-      padding-top: 1.2rem;
-      padding-bottom: 2rem;
-    }
-    h1, h2, h3 {
-      color: #0e3a5b;
-    }
-    .app-card {
-      border: 1px solid #d9e4ec;
-      border-radius: 14px;
-      padding: 1rem 1.1rem;
-      background: #f8fbfd;
-      margin-bottom: 0.8rem;
-    }
-    .metric-card {
-      border: 1px solid #c8d8e6;
-      border-radius: 14px;
-      padding: 0.9rem 1rem;
-      background: white;
-      min-height: 110px;
-    }
-    .metric-card .label {
-      color: #53708a;
-      font-size: 0.92rem;
-      margin-bottom: 0.4rem;
-    }
-    .metric-card .value {
-      color: #0e3a5b;
-      font-size: 1.35rem;
-      font-weight: 700;
-    }
-    div[data-testid="stMetric"] {
-      background: white;
-      border: 1px solid #c8d8e6;
-      border-radius: 14px;
-      padding: 0.8rem;
-    }
-    .fault-tag {
-      display: inline-block;
-      padding: 0.45rem 0.8rem;
-      margin: 0.2rem 0.3rem 0.2rem 0;
-      border-radius: 999px;
-      background: #e9f4fb;
-      color: #0e3a5b;
-      border: 1px solid #c7deed;
-      font-size: 0.92rem;
-    }
-    .flow-step {
-      display: inline-block;
-      padding: 0.5rem 0.75rem;
-      margin: 0.2rem 0.3rem 0.2rem 0;
-      border-radius: 10px;
-      background: #f2f7fb;
-      border: 1px solid #d7e4ef;
-      color: #1f4663;
-      font-size: 0.92rem;
-    }
-    </style>
-    """
+    return build_research_style()
 
 
 def _st():
@@ -124,48 +62,100 @@ def _st():
     return st
 
 
-def render_home_page() -> None:
+def render_home_page(single_page: Any) -> None:
     st = _st()
     sections = build_home_sections()
-    st.title(sections["title"])
-    st.caption(sections["subtitle"])
+    st.markdown(
+        f'<div class="research-hero"><h1>{sections["title"]}</h1><div class="subtitle">{sections["subtitle"]}</div></div>',
+        unsafe_allow_html=True,
+    )
 
     left, right = st.columns((1.6, 1.0), gap="large")
     with left:
-        st.markdown("### 六类故障")
+        st.markdown("### 六类识别能力")
+        st.markdown('<p class="section-intro">面向典型机械与水力状态的统一六分类诊断。</p>', unsafe_allow_html=True)
+        for row in (sections["fault_cards"][:3], sections["fault_cards"][3:]):
+            columns = st.columns(3)
+            for column, card in zip(columns, row):
+                with column:
+                    st.markdown(
+                        f'<div class="capability-card {card["tone"]}"><div class="title">{card["title"]}</div><div class="description">{card["description"]}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+        st.markdown("### 智能诊断流程")
+        flow_html = []
+        for index, step in enumerate(sections["pipeline"]):
+            if index:
+                flow_html.append('<span class="flow-arrow">↓</span>')
+            flow_html.append(f'<span class="flow-step">{step}</span>')
         st.markdown(
-            "".join(f'<span class="fault-tag">{fault}</span>' for fault in sections["faults"]),
-            unsafe_allow_html=True,
-        )
-        st.markdown("### 系统处理流程")
-        st.markdown(
-            " ".join(
-                [f'<span class="flow-step">{step}</span>' for step in sections["pipeline"][:-1]]
-                + [f'<span class="flow-step">{sections["pipeline"][-1]}</span>']
-            ).replace("</span> <span", "</span> → <span"),
+            f'<div class="flow-lane">{"".join(flow_html)}</div>',
             unsafe_allow_html=True,
         )
     with right:
-        st.markdown("### 系统参数信息")
+        st.markdown("### 正式推理参数")
+        st.markdown('<p class="section-intro">参数与 BP 六分类模型训练阶段保持一致。</p>', unsafe_allow_html=True)
         for label, value in sections["parameters"].items():
             st.markdown(
-                f'<div class="app-card"><strong>{label}</strong><br>{value}</div>',
+                f'<div class="app-card"><strong>{label}</strong><br><span class="section-intro">{value}</span></div>',
                 unsafe_allow_html=True,
             )
 
-    if st.button("开始单文件诊断", type="primary", use_container_width=True):
-        st.switch_page("pump_fault_app/ui/pages/single_diagnosis.py")
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("进入单文件智能诊断", type="primary", use_container_width=True):
+        st.switch_page(single_page)
+
+
+def render_top_navigation(st: Any, page_by_path: dict[str, Any]) -> None:
+    st.markdown('<div class="top-navigation-label">系统导航</div>', unsafe_allow_html=True)
+    items = build_navigation_items()
+    columns = st.columns(len(items), gap="small")
+    for column, item in zip(columns, items):
+        with column:
+            if st.button(
+                item["nav_label"],
+                key=f'top-nav-{item["url_path"]}',
+                use_container_width=True,
+            ):
+                st.switch_page(page_by_path[item["url_path"]])
 
 
 def main() -> None:
     st = _st()
-    st.set_page_config(page_title=APP_TITLE, page_icon="🔧", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title=APP_TITLE, page_icon="■", layout="wide", initial_sidebar_state="collapsed")
     st.markdown(build_global_style(), unsafe_allow_html=True)
-    pages = [
-        st.Page(item["callable"], title=item["title"], icon=item["icon"], url_path=item["url_path"])
-        for item in build_navigation_items()
-    ]
+    items = build_navigation_items()
+    item_by_path = {item["url_path"]: item for item in items}
+    single_item = item_by_path["single"]
+    single_page = st.Page(
+        single_item["callable"],
+        title=single_item["title"],
+        icon=single_item["icon"],
+        url_path=single_item["url_path"],
+    )
+    page_by_path = {
+        "home": st.Page(
+            lambda: render_home_page(single_page),
+            title=item_by_path["home"]["title"],
+            icon=item_by_path["home"]["icon"],
+            url_path=item_by_path["home"]["url_path"],
+            default=True,
+        ),
+        "single": single_page,
+        **{
+            item["url_path"]: st.Page(
+                item["callable"],
+                title=item["title"],
+                icon=item["icon"],
+                url_path=item["url_path"],
+            )
+            for item in items
+            if item["url_path"] not in {"home", "single"}
+        },
+    }
+    pages = [page_by_path[item["url_path"]] for item in items]
     navigation = st.navigation(pages, position="sidebar")
+    render_top_navigation(st, page_by_path)
     navigation.run()
 
 

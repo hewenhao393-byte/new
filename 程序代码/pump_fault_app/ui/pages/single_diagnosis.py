@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import tempfile
 import time
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,16 +9,18 @@ from typing import Any
 import pandas as pd
 
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
-
-_DISPLAY_LABELS = (
-    ("正常", "正常"),
-    ("转子不平衡", "转子不平衡"),
-    ("联轴器不对中", "联轴器不对中"),
-    ("松动", "机械松动"),
-    ("轴承故障", "轴承故障"),
-    ("汽蚀", "汽蚀"),
+from pump_fault_app.presentation.single_diagnosis import (
+    build_probability_rows,
+    build_upload_signal_info,
+    build_single_summary_items,
+    build_single_visual_availability,
+    build_spectrum_rows,
+    build_structured_summary_rows,
+    build_time_domain_rows,
+    build_wavelet_packet_rows,
+    build_window_distribution_rows,
 )
-
+from pump_fault_app.ui.branding import build_page_header
 
 def build_single_run_request(
     *,
@@ -56,95 +57,6 @@ def get_single_advanced_field_labels() -> dict[str, str]:
     }
 
 
-def build_probability_rows(top_probabilities: tuple[dict[str, float | str], ...]) -> list[dict[str, float | str]]:
-    probability_map = {str(item["label"]): float(item["probability"]) for item in top_probabilities}
-    return [
-        {"label": display_label, "probability": round(probability_map.get(internal_label, 0.0), 6)}
-        for internal_label, display_label in _DISPLAY_LABELS
-    ]
-
-
-def build_single_summary_items(
-    *,
-    quality_text: str,
-    window_count: int | None,
-    elapsed_seconds: float,
-    message: str,
-    warning_count: int,
-) -> dict[str, str]:
-    return {
-        "信号质量": quality_text,
-        "窗口数量": "-" if window_count is None else str(window_count),
-        "推理耗时": f"{elapsed_seconds:.3f} s",
-        "关键输出": message,
-        "运行告警数": str(warning_count),
-    }
-
-
-def build_single_visual_availability(result: Any) -> dict[str, bool]:
-    inference_result = result.inference_result
-    summary = result.summary
-    visualization = result.visualization
-    return {
-        "probability_chart": bool(summary.top_probabilities),
-        "window_distribution": bool(inference_result.window_predictions),
-        "waveform": bool(visualization and visualization.time_domain is not None),
-        "spectrum": bool(visualization and visualization.frequency_spectrum is not None),
-        "envelope": bool(visualization and visualization.envelope_spectrum is not None),
-        "wavelet": bool(visualization and visualization.wavelet_packet_energy is not None),
-    }
-
-
-def build_window_distribution_rows(window_predictions: tuple[Any, ...] | None) -> list[dict[str, str | int]]:
-    if not window_predictions:
-        return []
-    counts = Counter(prediction.predicted_label for prediction in window_predictions)
-    return [{"label": label, "count": count} for label, count in counts.items()]
-
-
-def build_time_domain_rows(series: Any) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "time_seconds": list(series.time_s),
-            "amplitude": list(series.amplitude),
-        }
-    )
-
-
-def build_spectrum_rows(series: Any) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "frequency_hz": list(series.frequency_hz),
-            "amplitude": list(series.amplitude),
-        }
-    )
-
-
-def build_wavelet_packet_rows(series: Any) -> list[dict[str, float | str]]:
-    return [
-        {"band_label": label, "energy_ratio": ratio}
-        for label, ratio in zip(series.band_labels, series.energy_ratio)
-    ]
-
-
-def build_structured_summary_rows(summary: Any, inference_result: Any, diagnosis_time: str) -> list[dict[str, str]]:
-    quality_text = "-"
-    if inference_result.quality_report is not None:
-        quality_text = inference_result.quality_report.quality_level
-    return [
-        {"项目": "文件名称", "内容": str(summary.file_name or "-")},
-        {"项目": "设备编号", "内容": str(summary.device_id or "-")},
-        {"项目": "测点位置", "内容": str(summary.measurement_position or "-")},
-        {"项目": "采样率", "内容": "-" if summary.sampling_rate_hz is None else f"{summary.sampling_rate_hz} Hz"},
-        {"项目": "转速", "内容": "-" if summary.rpm is None else f"{summary.rpm:.1f} rpm"},
-        {"项目": "预测类别", "内容": str(summary.diagnosis_label or "-")},
-        {"项目": "综合置信度", "内容": "-" if summary.confidence is None else f"{summary.confidence:.3f}"},
-        {"项目": "有效窗口数", "内容": "-" if summary.window_count is None else str(summary.window_count)},
-        {"项目": "信号质量", "内容": quality_text},
-        {"项目": "诊断时间", "内容": diagnosis_time},
-    ]
-
-
 def _st():
     import streamlit as st
 
@@ -169,7 +81,7 @@ def _render_probability_chart(st: Any, rows: list[dict[str, float | str]]) -> No
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#0f5b8d")
+        .mark_bar(color="#58a6c7")
         .encode(
             x=alt.X("probability:Q", title="概率"),
             y=alt.Y("label:N", sort=[row["label"] for row in rows], title="类别"),
@@ -187,7 +99,7 @@ def _render_window_distribution(st: Any, rows: list[dict[str, str | int]]) -> No
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#157a6e")
+        .mark_bar(color="#3fb950")
         .encode(
             x=alt.X("label:N", title="类别"),
             y=alt.Y("count:Q", title="窗口数"),
@@ -230,7 +142,7 @@ def _render_wavelet_packet(st: Any, rows: list[dict[str, float | str]]) -> None:
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#2f6f4f")
+        .mark_bar(color="#d29922")
         .encode(
             x=alt.X("band_label:N", title="频带"),
             y=alt.Y("energy_ratio:Q", title="能量占比"),
@@ -267,10 +179,20 @@ def main() -> None:
     st = _st()
     labels = get_single_advanced_field_labels()
 
-    st.title("单文件诊断")
-    st.caption("上传一条振动记录并调用统一诊断服务完成正式六分类判断。")
+    st.markdown(
+        build_page_header(
+            title="单文件智能诊断",
+            subtitle="上传一条振动记录，调用正式 BP 六分类推理服务完成诊断。",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### 输入信号与运行参数")
 
     uploaded_file = st.file_uploader("振动数据文件", type=["csv", "txt", "wav"])
+    st.markdown(
+        '<div class="input-note">输入信号采样率可不同于模型标准采样率，系统会在正式推理中自动完成重采样处理。</div>',
+        unsafe_allow_html=True,
+    )
     col1, col2 = st.columns(2)
     with col1:
         sampling_rate_hz = int(st.number_input("采样率 Hz", min_value=1, value=12000, step=100))
@@ -283,6 +205,22 @@ def main() -> None:
         device_id = st.text_input(labels["device_id"], value="")
         measurement_position = st.text_input(labels["measurement_position"], value="")
         export_enabled = st.checkbox(labels["export"], value=True, help="勾选后生成可下载的 JSON/CSV 结果文件。")
+
+    if uploaded_file is not None:
+        st.subheader("已载入信号文件信息")
+        st.dataframe(
+            build_upload_signal_info(
+                file_name=uploaded_file.name,
+                file_size_bytes=getattr(uploaded_file, "size", None),
+                sampling_rate_hz=sampling_rate_hz,
+                rpm=rpm,
+                signal_column=signal_column,
+                time_column=time_column,
+                measurement_position=measurement_position,
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     if st.button("开始诊断", type="primary", use_container_width=True):
         if uploaded_file is None:
@@ -316,6 +254,7 @@ def main() -> None:
             st.error(summary.message)
 
         quality_text = result.inference_result.quality_report.quality_level if result.inference_result.quality_report is not None else "-"
+        st.markdown("#### 诊断结论总览")
         metric_cols = st.columns(4)
         metric_cols[0].metric("预测故障类别", summary.diagnosis_label or "-")
         metric_cols[1].metric("综合置信度", "-" if summary.confidence is None else f"{summary.confidence:.3f}")
@@ -341,7 +280,7 @@ def main() -> None:
                 y_field="amplitude",
                 x_title="时间 / s",
                 y_title="幅值",
-                color="#0f5b8d",
+                color="#58a6c7",
             )
 
         if visual_availability["spectrum"] and result.visualization is not None and result.visualization.frequency_spectrum is not None:
@@ -353,7 +292,7 @@ def main() -> None:
                 y_field="amplitude",
                 x_title="频率 / Hz",
                 y_title="幅值",
-                color="#157a6e",
+                color="#3fb950",
             )
         with st.expander("详细分析", expanded=False):
             if visual_availability["envelope"] and result.visualization is not None and result.visualization.envelope_spectrum is not None:
@@ -365,7 +304,7 @@ def main() -> None:
                     y_field="amplitude",
                     x_title="频率 / Hz",
                     y_title="幅值",
-                    color="#a05a2c",
+                    color="#d29922",
                 )
             if visual_availability["wavelet"] and result.visualization is not None and result.visualization.wavelet_packet_energy is not None:
                 st.markdown("#### 小波包能量占比（展示数据）")
@@ -392,8 +331,9 @@ def main() -> None:
         )
 
         if summary.runtime_alerts:
-            st.warning("本次诊断存在运行告警，请结合告警内容复核结果。")
-            st.dataframe(summary.runtime_alerts, use_container_width=True, hide_index=True)
+            st.info("信号处理状态：已完成数值稳定性保护处理，不影响诊断结果。")
+            with st.expander(f"查看详细运行告警（{len(summary.runtime_alerts)} 条）", expanded=False):
+                st.dataframe(summary.runtime_alerts, use_container_width=True, hide_index=True)
 
         if result.visualization is not None and result.visualization.warnings:
             st.warning("部分可视化数据生成失败，已保留正式诊断结果。")

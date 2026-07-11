@@ -6,7 +6,7 @@ import numpy as np
 import pywt
 from scipy import signal, stats
 
-from pump_diagnosis.inference_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
 from pump_fault_app.domain.records import FeatureVector, SampleMetadata, SignalWindow
 
 _EPS = 1e-12

@@ -5,7 +5,7 @@ from fractions import Fraction
 import numpy as np
 from scipy import signal
 
-from pump_diagnosis.inference_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
 from pump_fault_app.domain.records import PreprocessedSignalRecord, RawSignalRecord
 
 

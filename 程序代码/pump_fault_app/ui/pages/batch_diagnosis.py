@@ -7,6 +7,12 @@ from typing import Any, Iterable
 import pandas as pd
 
 from pump_fault_app.services import AppBatchRunRequest, run_batch_diagnosis
+from pump_fault_app.presentation.batch_diagnosis import (
+    build_batch_filter_options,
+    build_batch_table_rows,
+    build_batch_task_statistics,
+)
+from pump_fault_app.ui.branding import build_page_header
 
 
 def build_multi_file_batch_request(
@@ -30,39 +36,6 @@ def build_multi_file_batch_request(
 
 def build_batch_manifest_request(*, manifest_path: Path, export_root: Path | None = None) -> AppBatchRunRequest:
     return AppBatchRunRequest(manifest_path=manifest_path, export_root=export_root)
-
-
-def build_batch_filter_options(summaries: Iterable[dict[str, Any]]) -> list[str]:
-    labels = sorted({str(summary["diagnosis_label"]) for summary in summaries if summary.get("diagnosis_label")})
-    return ["全部", *labels]
-
-
-def build_batch_table_rows(summaries: Iterable[dict[str, Any]]) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for summary in summaries:
-        confidence = summary.get("confidence")
-        rows.append(
-            {
-                "文件名": str(summary.get("file_name") or "-"),
-                "设备编号": str(summary.get("device_id") or "-"),
-                "预测类别": str(summary.get("diagnosis_label") or "-"),
-                "置信度": "-" if confidence is None else f"{float(confidence):.3f}",
-                "信号质量": str(summary.get("signal_quality") or _infer_signal_quality(summary)),
-                "状态": str(summary.get("status") or "-"),
-            }
-        )
-    return rows
-
-
-def _infer_signal_quality(summary: dict[str, Any]) -> str:
-    status = str(summary.get("status") or "")
-    if status == "diagnosed":
-        return "pass"
-    if status == "rejected":
-        return "rejected"
-    if status == "input_error":
-        return "unavailable"
-    return "-"
 
 
 def _st():
@@ -112,8 +85,14 @@ def _render_downloads(st: Any, export_result: Any) -> None:
 
 def main() -> None:
     st = _st()
-    st.title("批量诊断")
-    st.caption("支持多文件上传或 manifest.csv 两种方式进行批量诊断。")
+    st.markdown(
+        build_page_header(
+            title="批量诊断任务",
+            subtitle="支持多文件上传或 manifest.csv 清单，统一调用正式批量诊断服务。",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### 批量任务输入")
 
     mode = st.radio("输入方式", ("多个振动文件", "manifest.csv"), horizontal=True)
     result = None
@@ -168,26 +147,21 @@ def main() -> None:
         return
 
     summaries = [summary.as_dict() for summary in result.batch_result.summaries]
+    statistics = build_batch_task_statistics(summaries)
+    st.subheader("批量任务统计总览")
+    st.markdown('<p class="task-stat-caption">基于当前批量任务的已有诊断结果汇总。</p>', unsafe_allow_html=True)
+    statistic_columns = st.columns(4)
+    for column, (label, value) in zip(statistic_columns, statistics.items()):
+        with column:
+            st.metric(label, value)
+
     filter_options = build_batch_filter_options(summaries)
     selected_label = st.selectbox("按预测类别筛选", filter_options, index=0)
     if selected_label != "全部":
         summaries = [summary for summary in summaries if summary.get("diagnosis_label") == selected_label]
 
-    st.subheader("批量诊断结果")
+    st.subheader("批量诊断结果明细")
     st.dataframe(pd.DataFrame(build_batch_table_rows(summaries)), use_container_width=True, hide_index=True)
-    st.subheader("批量摘要")
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"项目": "文件总数", "内容": result.batch_result.total_count},
-                {"项目": "成功诊断数", "内容": result.batch_result.diagnosed_count},
-                {"项目": "质量拒绝数", "内容": result.batch_result.rejected_count},
-                {"项目": "输入错误数", "内容": result.batch_result.input_error_count},
-            ]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
     _render_downloads(st, result.export_result)
 
 

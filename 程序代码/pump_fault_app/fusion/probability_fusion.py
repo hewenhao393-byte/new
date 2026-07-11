@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from pump_diagnosis.inference_contract import FORMAL_LABEL_ORDER
+from pump_fault_app.domain.formal_contract import FORMAL_LABEL_ORDER
 from pump_fault_app.domain.records import RecordPredictionResult, WindowPredictionResult
 
 
