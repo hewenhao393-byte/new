@@ -20,6 +20,7 @@ from pump_fault_app.presentation.single_diagnosis import (
     build_wavelet_packet_rows,
     build_window_distribution_rows,
 )
+from pump_fault_app.ui.branding import build_page_header
 
 def build_single_run_request(
     *,
@@ -80,7 +81,7 @@ def _render_probability_chart(st: Any, rows: list[dict[str, float | str]]) -> No
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#0f5b8d")
+        .mark_bar(color="#58a6c7")
         .encode(
             x=alt.X("probability:Q", title="概率"),
             y=alt.Y("label:N", sort=[row["label"] for row in rows], title="类别"),
@@ -98,7 +99,7 @@ def _render_window_distribution(st: Any, rows: list[dict[str, str | int]]) -> No
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#157a6e")
+        .mark_bar(color="#3fb950")
         .encode(
             x=alt.X("label:N", title="类别"),
             y=alt.Y("count:Q", title="窗口数"),
@@ -141,7 +142,7 @@ def _render_wavelet_packet(st: Any, rows: list[dict[str, float | str]]) -> None:
     frame = pd.DataFrame(rows)
     chart = (
         alt.Chart(frame)
-        .mark_bar(color="#2f6f4f")
+        .mark_bar(color="#d29922")
         .encode(
             x=alt.X("band_label:N", title="频带"),
             y=alt.Y("energy_ratio:Q", title="能量占比"),
@@ -178,8 +179,14 @@ def main() -> None:
     st = _st()
     labels = get_single_advanced_field_labels()
 
-    st.title("单文件诊断")
-    st.caption("上传一条振动记录并调用统一诊断服务完成正式六分类判断。")
+    st.markdown(
+        build_page_header(
+            title="单文件智能诊断",
+            subtitle="上传一条振动记录，调用正式 BP 六分类推理服务完成诊断。",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### 输入信号与运行参数")
 
     uploaded_file = st.file_uploader("振动数据文件", type=["csv", "txt", "wav"])
     st.markdown(
@@ -200,7 +207,7 @@ def main() -> None:
         export_enabled = st.checkbox(labels["export"], value=True, help="勾选后生成可下载的 JSON/CSV 结果文件。")
 
     if uploaded_file is not None:
-        st.subheader("信号文件信息")
+        st.subheader("已载入信号文件信息")
         st.dataframe(
             build_upload_signal_info(
                 file_name=uploaded_file.name,
@@ -247,6 +254,7 @@ def main() -> None:
             st.error(summary.message)
 
         quality_text = result.inference_result.quality_report.quality_level if result.inference_result.quality_report is not None else "-"
+        st.markdown("#### 诊断结论总览")
         metric_cols = st.columns(4)
         metric_cols[0].metric("预测故障类别", summary.diagnosis_label or "-")
         metric_cols[1].metric("综合置信度", "-" if summary.confidence is None else f"{summary.confidence:.3f}")
@@ -272,7 +280,7 @@ def main() -> None:
                 y_field="amplitude",
                 x_title="时间 / s",
                 y_title="幅值",
-                color="#0f5b8d",
+                color="#58a6c7",
             )
 
         if visual_availability["spectrum"] and result.visualization is not None and result.visualization.frequency_spectrum is not None:
@@ -284,7 +292,7 @@ def main() -> None:
                 y_field="amplitude",
                 x_title="频率 / Hz",
                 y_title="幅值",
-                color="#157a6e",
+                color="#3fb950",
             )
         with st.expander("详细分析", expanded=False):
             if visual_availability["envelope"] and result.visualization is not None and result.visualization.envelope_spectrum is not None:
@@ -296,7 +304,7 @@ def main() -> None:
                     y_field="amplitude",
                     x_title="频率 / Hz",
                     y_title="幅值",
-                    color="#a05a2c",
+                    color="#d29922",
                 )
             if visual_availability["wavelet"] and result.visualization is not None and result.visualization.wavelet_packet_energy is not None:
                 st.markdown("#### 小波包能量占比（展示数据）")

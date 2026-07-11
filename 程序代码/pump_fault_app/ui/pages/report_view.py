@@ -17,7 +17,7 @@ from pump_fault_app.presentation.single_diagnosis import (
 )
 from pump_fault_app.presentation.batch_diagnosis import build_batch_table_rows
 from pump_fault_app.presentation.report_view import build_diagnosis_highlight
-from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE
+from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE, build_page_header
 
 
 def build_report_empty_message() -> str:
@@ -143,7 +143,7 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
         probability_frame = pd.DataFrame(
             [{"label": item.label, "probability": item.probability} for item in view_data.probabilities]
         )
-        _render_bar_chart(st, probability_frame, x_field="label", y_field="probability", x_title="类别", y_title="概率", color="#0f5b8d")
+        _render_bar_chart(st, probability_frame, x_field="label", y_field="probability", x_title="类别", y_title="概率", color="#58a6c7")
 
     if view_data.window_distribution:
         st.subheader("窗口级预测分布")
@@ -154,7 +154,7 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
             y_field="count",
             x_title="类别",
             y_title="窗口数",
-            color="#157a6e",
+            color="#3fb950",
         )
 
     st.subheader("信号质量")
@@ -163,16 +163,16 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
     st.subheader("信号分析图")
     if visual_rows["time_domain"] is not None:
         st.markdown("#### 时域波形（展示数据）")
-        _render_line_chart(st, visual_rows["time_domain"], x_field="time_seconds", y_field="amplitude", x_title="时间 / s", y_title="幅值", color="#0f5b8d")
+        _render_line_chart(st, visual_rows["time_domain"], x_field="time_seconds", y_field="amplitude", x_title="时间 / s", y_title="幅值", color="#58a6c7")
     if visual_rows["frequency_spectrum"] is not None:
         st.markdown("#### 0–5000 Hz 频谱（展示数据）")
-        _render_line_chart(st, visual_rows["frequency_spectrum"], x_field="frequency_hz", y_field="amplitude", x_title="频率 / Hz", y_title="幅值", color="#157a6e")
+        _render_line_chart(st, visual_rows["frequency_spectrum"], x_field="frequency_hz", y_field="amplitude", x_title="频率 / Hz", y_title="幅值", color="#3fb950")
     if visual_rows["envelope_spectrum"] is not None:
         st.markdown("#### 包络谱（展示数据）")
-        _render_line_chart(st, visual_rows["envelope_spectrum"], x_field="frequency_hz", y_field="amplitude", x_title="频率 / Hz", y_title="幅值", color="#a05a2c")
+        _render_line_chart(st, visual_rows["envelope_spectrum"], x_field="frequency_hz", y_field="amplitude", x_title="频率 / Hz", y_title="幅值", color="#d29922")
     if visual_rows["wavelet_packet_energy"] is not None:
         st.markdown("#### 小波包能量占比（展示数据）")
-        _render_bar_chart(st, pd.DataFrame(visual_rows["wavelet_packet_energy"]), x_field="band_label", y_field="energy_ratio", x_title="频带", y_title="能量占比", color="#2f6f4f")
+        _render_bar_chart(st, pd.DataFrame(visual_rows["wavelet_packet_energy"]), x_field="band_label", y_field="energy_ratio", x_title="频带", y_title="能量占比", color="#d29922")
 
     if view_data.visualization_availability.messages:
         st.subheader("可视化告警")
@@ -318,8 +318,13 @@ def main() -> None:
         st.session_state.get("batch_run_result"),
         st.session_state.get("latest_result_kind"),
     )
-    st.title("诊断结果")
-    st.caption(overview["subtitle"])
+    st.markdown(
+        build_page_header(
+            title="诊断结果与报告",
+            subtitle=overview["subtitle"],
+        ),
+        unsafe_allow_html=True,
+    )
 
     if overview["active_kind"] is None:
         st.info(build_report_empty_message())

@@ -40,6 +40,7 @@ from pump_fault_app.presentation.batch_diagnosis import (
 )
 from pump_fault_app.presentation.report_view import build_diagnosis_highlight
 from pump_fault_app.presentation.single_diagnosis import build_upload_signal_info
+from pump_fault_app.ui.branding import build_page_header, build_research_style
 
 
 def test_build_single_run_request_returns_service_request(tmp_path: Path) -> None:
@@ -225,6 +226,26 @@ def test_build_home_sections_returns_title_and_modules() -> None:
     assert sections["pipeline"][-1] == "诊断报告输出"
 
 
+def test_research_style_uses_light_scientific_palette_without_model_claims() -> None:
+    style = build_research_style()
+
+    assert "#f7f9fc" in style
+    assert "#ffffff" in style
+    assert ".research-card" in style
+    assert "#111418" not in style
+    assert "XGBoost" not in style
+    assert "time.sleep" not in style
+
+
+def test_page_header_omits_internal_navigation_numbering() -> None:
+    header = build_page_header(title="单文件智能诊断", subtitle="真实振动信号六分类诊断。")
+
+    assert "单文件智能诊断" in header
+    assert "真实振动信号六分类诊断。" in header
+    assert "01 /" not in header
+    assert "console-page-header" not in header
+
+
 def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> None:
     items = build_navigation_items()
 
@@ -233,6 +254,12 @@ def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> No
         "单文件诊断",
         "批量诊断",
         "诊断结果",
+    ]
+    assert [item["nav_label"] for item in items] == [
+        "01 系统首页",
+        "02 单文件诊断",
+        "03 批量诊断",
+        "04 诊断结果",
     ]
 
 
@@ -275,6 +302,18 @@ def test_top_navigation_is_rendered_outside_the_collapsible_sidebar() -> None:
     assert "def render_top_navigation" in text
     assert "render_top_navigation(st, page_by_path)" in text
     assert "key=f'top-nav-" in text
+
+
+def test_ui_keeps_real_service_contracts_and_avoids_demo_sensor_inputs() -> None:
+    root = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui"
+    text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+
+    assert "run_single_diagnosis" in text
+    assert "run_batch_diagnosis" in text
+    assert "XGBoost" not in text
+    assert "轴承温度" not in text
+    assert "流量 (m³/h)" not in text
+    assert "time.sleep" not in text
 
 
 def test_ui_modules_only_depend_on_services_layer() -> None:

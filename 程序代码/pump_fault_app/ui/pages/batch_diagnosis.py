@@ -12,6 +12,7 @@ from pump_fault_app.presentation.batch_diagnosis import (
     build_batch_table_rows,
     build_batch_task_statistics,
 )
+from pump_fault_app.ui.branding import build_page_header
 
 
 def build_multi_file_batch_request(
@@ -84,8 +85,14 @@ def _render_downloads(st: Any, export_result: Any) -> None:
 
 def main() -> None:
     st = _st()
-    st.title("批量诊断")
-    st.caption("支持多文件上传或 manifest.csv 两种方式进行批量诊断。")
+    st.markdown(
+        build_page_header(
+            title="批量诊断任务",
+            subtitle="支持多文件上传或 manifest.csv 清单，统一调用正式批量诊断服务。",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### 批量任务输入")
 
     mode = st.radio("输入方式", ("多个振动文件", "manifest.csv"), horizontal=True)
     result = None
@@ -141,7 +148,7 @@ def main() -> None:
 
     summaries = [summary.as_dict() for summary in result.batch_result.summaries]
     statistics = build_batch_task_statistics(summaries)
-    st.subheader("批量任务统计")
+    st.subheader("批量任务统计总览")
     st.markdown('<p class="task-stat-caption">基于当前批量任务的已有诊断结果汇总。</p>', unsafe_allow_html=True)
     statistic_columns = st.columns(4)
     for column, (label, value) in zip(statistic_columns, statistics.items()):
@@ -153,7 +160,7 @@ def main() -> None:
     if selected_label != "全部":
         summaries = [summary for summary in summaries if summary.get("diagnosis_label") == selected_label]
 
-    st.subheader("批量任务结果")
+    st.subheader("批量诊断结果明细")
     st.dataframe(pd.DataFrame(build_batch_table_rows(summaries)), use_container_width=True, hide_index=True)
     _render_downloads(st, result.export_result)
 
