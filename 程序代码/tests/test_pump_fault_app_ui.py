@@ -32,6 +32,12 @@ from pump_fault_app.ui.pages.single_diagnosis import (
     get_single_advanced_field_labels,
 )
 from pump_fault_app.presentation.status import build_runtime_processing_status
+from pump_fault_app.presentation.batch_diagnosis import (
+    build_batch_table_rows as build_presentation_batch_table_rows,
+    build_batch_task_statistics,
+)
+from pump_fault_app.presentation.report_view import build_diagnosis_highlight
+from pump_fault_app.presentation.single_diagnosis import build_upload_signal_info
 
 
 def test_build_single_run_request_returns_service_request(tmp_path: Path) -> None:
@@ -128,9 +134,74 @@ def test_build_batch_table_rows_returns_expected_columns() -> None:
     )
 
     assert rows == [
-        {"文件": "a.csv", "预测类别": "正常", "置信度": "0.910", "状态": "diagnosed"},
-        {"文件": "b.csv", "预测类别": "-", "置信度": "-", "状态": "rejected"},
+        {
+            "文件名": "a.csv",
+            "设备编号": "-",
+            "预测类别": "正常",
+            "置信度": "91.0%",
+            "信号质量": "pass",
+            "状态": "已完成",
+        },
+        {
+            "文件名": "b.csv",
+            "设备编号": "-",
+            "预测类别": "-",
+            "置信度": "-",
+            "信号质量": "rejected",
+            "状态": "质量拒绝",
+        },
     ]
+
+
+def test_build_batch_task_statistics_summarizes_existing_diagnosis_results() -> None:
+    statistics = build_batch_task_statistics(
+        [
+            {"status": "diagnosed", "diagnosis_label": "正常", "confidence": 0.9},
+            {"status": "diagnosed", "diagnosis_label": "汽蚀", "confidence": 0.98},
+            {"status": "rejected", "diagnosis_label": None, "confidence": None},
+        ]
+    )
+
+    assert statistics == {
+        "总文件数": "3",
+        "完成数量": "2",
+        "异常数量": "1",
+        "平均置信度": "94.0%",
+    }
+
+
+def test_build_upload_signal_info_uses_only_uploaded_metadata_and_user_inputs() -> None:
+    rows = build_upload_signal_info(
+        file_name="demo.csv",
+        file_size_bytes=2048,
+        sampling_rate_hz=20000,
+        rpm=2070.0,
+        signal_column="0",
+        time_column="time",
+        measurement_position="泵驱端水平",
+    )
+
+    assert rows == [
+        {"项目": "文件名称", "内容": "demo.csv"},
+        {"项目": "文件大小", "内容": "2.0 KB"},
+        {"项目": "输入采样率", "内容": "20000 Hz"},
+        {"项目": "转速", "内容": "2070.0 rpm"},
+        {"项目": "信号列", "内容": "0"},
+        {"项目": "时间列", "内容": "time"},
+        {"项目": "测点位置", "内容": "泵驱端水平"},
+    ]
+
+
+def test_build_diagnosis_highlight_uses_normal_fault_and_warning_display_tones() -> None:
+    assert build_diagnosis_highlight("正常", "93.2%", "可信诊断") == {
+        "tone": "normal",
+        "status": "正常",
+        "label": "正常",
+        "confidence": "93.2%",
+        "grade": "可信诊断",
+    }
+    assert build_diagnosis_highlight("汽蚀", "99.9%", "可信诊断")["tone"] == "fault"
+    assert build_diagnosis_highlight("-", "-", "建议复测")["tone"] == "warning"
 
 
 def test_build_home_sections_returns_title_and_modules() -> None:
@@ -146,8 +217,10 @@ def test_build_home_sections_returns_title_and_modules() -> None:
         "轴承故障",
         "汽蚀",
     )
-    assert "文件上传" in sections["pipeline"]
+    assert "振动信号输入" in sections["pipeline"]
     assert sections["parameters"]["默认采样率"] == "12000 Hz"
+    assert sections["fault_cards"][0]["title"] == "正常状态"
+    assert sections["pipeline"][-1] == "诊断报告输出"
 
 
 def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> None:
@@ -157,8 +230,19 @@ def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> No
         "系统首页",
         "单文件诊断",
         "批量诊断",
-        "诊断报告",
+        "诊断结果",
     ]
+
+
+def test_batch_display_helpers_are_owned_by_presentation_layer() -> None:
+    assert build_presentation_batch_table_rows(
+        [{"file_name": "a.csv", "status": "diagnosed", "diagnosis_label": "正常", "confidence": 0.9}]
+    )[0]["状态"] == "已完成"
+
+    report_view = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "pages" / "report_view.py"
+    text = report_view.read_text(encoding="utf-8")
+    assert "pump_fault_app.presentation.batch_diagnosis" in text
+    assert "from pump_fault_app.ui.pages.batch_diagnosis import build_batch_table_rows" not in text
 
 
 def test_home_page_cta_switches_to_the_registered_navigation_page() -> None:
@@ -340,8 +424,8 @@ def test_build_batch_table_rows_returns_expected_columns() -> None:
     )
 
     assert rows == [
-        {"文件名": "a.csv", "设备编号": "M2", "预测类别": "正常", "置信度": "0.910", "信号质量": "pass", "状态": "diagnosed"},
-        {"文件名": "b.csv", "设备编号": "-", "预测类别": "-", "置信度": "-", "信号质量": "rejected", "状态": "rejected"},
+        {"文件名": "a.csv", "设备编号": "M2", "预测类别": "正常", "置信度": "91.0%", "信号质量": "pass", "状态": "已完成"},
+        {"文件名": "b.csv", "设备编号": "-", "预测类别": "-", "置信度": "-", "信号质量": "rejected", "状态": "质量拒绝"},
     ]
 
 
