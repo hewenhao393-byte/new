@@ -1,5 +1,7 @@
+import json
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,6 +14,7 @@ from tools.record_level_single_channel_catboost import (
     fit_channel_model,
     fuse_record_probabilities,
     load_complete_feature_table,
+    run_experiment,
     select_channel_features,
     split_distribution,
     validate_no_leakage,
@@ -474,3 +477,155 @@ def test_load_complete_feature_table_combines_disjoint_legacy_splits(tmp_path):
         split / "train_features_63.csv",
         split / "test_features_63.csv",
     ]
+
+
+@pytest.fixture
+def tiny_experiment_data(formal_feature_names):
+    rows = []
+    sources = [
+        ("source/normal_ch4.csv", "正常", "Motor-2", 100, 1480),
+        ("source/cavitation_ch4.csv", "汽蚀", "Motor-4", 70, 2070),
+    ]
+    for source_index, (ch4_path, label, device, speed, rpm) in enumerate(sources):
+        for record_index in range(2):
+            group_id = f"g{source_index}-{record_index}"
+            for window_id in range(2):
+                row = {
+                    "group_id": group_id,
+                    "record_column": str(record_index),
+                    "device_id": device,
+                    "speed_percent": speed,
+                    "rpm": rpm,
+                    "label": label,
+                    "window_id": window_id,
+                    "window_start": window_id * 1200,
+                    "window_end": window_id * 1200 + 2400,
+                    "ch3_path": ch4_path.replace("ch4", "ch3"),
+                    "ch4_path": ch4_path,
+                    "ch5_path": ch4_path.replace("ch4", "ch5"),
+                }
+                row.update(
+                    {
+                        name: float(source_index + record_index + window_id + offset)
+                        for offset, name in enumerate(formal_feature_names)
+                    }
+                )
+                rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def test_run_experiment_refuses_existing_output_directory(
+    tmp_path, tiny_experiment_data
+):
+    output = tmp_path / "existing"
+    output.mkdir()
+    source = tmp_path / "source.csv"
+    metadata = tmp_path / "window_metadata.csv"
+    source.write_text("source", encoding="utf-8")
+    metadata.write_text("metadata", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Refusing to overwrite"):
+        run_experiment(
+            tiny_experiment_data,
+            [source],
+            metadata,
+            output,
+        )
+
+
+def test_run_experiment_reuses_assignment_and_writes_complete_outputs(
+    tmp_path, tiny_experiment_data
+):
+    output = tmp_path / "result"
+    source = tmp_path / "source.csv"
+    metadata_path = tmp_path / "window_metadata.csv"
+    source.write_text("source-data", encoding="utf-8")
+    metadata_path.write_text("metadata-data", encoding="utf-8")
+    fit_calls = []
+    reload_calls = []
+
+    class FakeModel:
+        def __init__(self, channel, features):
+            self.channel = channel
+            self.feature_names_ = list(features)
+            self.classes_ = np.array(["正常", "汽蚀"])
+
+        def save_model(self, path):
+            Path(path).write_text(f"model-{self.channel}", encoding="utf-8")
+
+    def fake_fit(train, test, features, channel):
+        fit_calls.append(
+            {
+                "channel": channel,
+                "features": list(features),
+                "train_object": id(train),
+                "test_object": id(test),
+                "train_groups": frozenset(train["group_id"]),
+                "test_groups": frozenset(test["group_id"]),
+            }
+        )
+        probabilities = np.tile([0.75, 0.25], (len(test), 1))
+        return FakeModel(channel, features), probabilities
+
+    def fake_reload(model_path, test, features):
+        channel = model_path.parent.name.removeprefix("ch")
+        reload_calls.append(
+            {
+                "channel": channel,
+                "features": list(features),
+                "test_groups": frozenset(test["group_id"]),
+            }
+        )
+        return list(features), np.tile([0.75, 0.25], (len(test), 1))
+
+    run_experiment(
+        tiny_experiment_data,
+        [source],
+        metadata_path,
+        output,
+        fit_model=fake_fit,
+        reload_predict=fake_reload,
+    )
+
+    assert [call["channel"] for call in fit_calls] == ["3", "4", "5"]
+    assert [call["channel"] for call in reload_calls] == ["3", "4", "5"]
+    assert len({call["train_object"] for call in fit_calls}) == 1
+    assert len({call["test_object"] for call in fit_calls}) == 1
+    assert len({call["train_groups"] for call in fit_calls}) == 1
+    assert len({call["test_groups"] for call in fit_calls}) == 1
+    assert all(len(call["features"]) == 21 for call in fit_calls)
+    assert all(
+        all(name.startswith(f"ch{call['channel']}_") for name in call["features"])
+        for call in fit_calls
+    )
+    assert [call["features"] for call in reload_calls] == [
+        call["features"] for call in fit_calls
+    ]
+
+    top_level = {
+        "record_assignment.csv",
+        "split_distribution.csv",
+        "comparison.csv",
+        "summary.json",
+    }
+    assert top_level.issubset({path.name for path in output.iterdir()})
+    per_channel = {
+        "metadata.json",
+        "window_predictions.csv",
+        "record_predictions.csv",
+        "window_metrics.json",
+        "record_metrics.json",
+    }
+    record_group_ids = []
+    for channel in ("3", "4", "5"):
+        channel_dir = output / f"ch{channel}"
+        assert (channel_dir / f"ch{channel}_catboost.cbm").exists()
+        assert per_channel.issubset({path.name for path in channel_dir.iterdir()})
+        channel_metadata = json.loads((channel_dir / "metadata.json").read_text())
+        assert channel_metadata["source_sha256"]
+        assert len(channel_metadata["assignment_sha256"]) == 64
+        assert channel_metadata["model_reload_verified"] is True
+        record_group_ids.append(
+            set(pd.read_csv(channel_dir / "record_predictions.csv")["group_id"])
+        )
+    assert record_group_ids[0] == record_group_ids[1] == record_group_ids[2]

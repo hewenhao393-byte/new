@@ -405,19 +405,43 @@ def _json_default(value):
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def main() -> None:
-    """Run the fixed three-model experiment; intentionally not called on import."""
+def _reload_catboost_probabilities(
+    model_path: Path,
+    test: pd.DataFrame,
+    features: list[str],
+) -> tuple[list[str], np.ndarray]:
     from catboost import CatBoostClassifier, Pool
 
-    if OUTPUT_ROOT.exists():
-        raise RuntimeError(f"Refusing to overwrite output directory: {OUTPUT_ROOT}")
+    restored = CatBoostClassifier()
+    restored.load_model(str(model_path))
+    probabilities = restored.predict_proba(
+        Pool(test.loc[:, features], test["label"]),
+        thread_count=FIXED_PARAMS["thread_count"],
+    )
+    return list(restored.feature_names_), np.asarray(probabilities, dtype=float)
 
-    data, source_paths = load_complete_feature_table(SOURCE_ROOT)
-    metadata_path = SOURCE_ROOT / "window_metadata.csv"
-    if len(data) != 219_555 or data["group_id"].nunique() != 1_845:
-        raise ValueError(
-            "Complete source must contain 219,555 windows and 1,845 records"
-        )
+
+def run_experiment(
+    data: pd.DataFrame,
+    source_paths,
+    metadata_path: Path,
+    output_root: Path,
+    *,
+    fit_model=fit_channel_model,
+    reload_predict=None,
+) -> None:
+    """Run all three channels against one shared, leakage-safe assignment."""
+    output_root = Path(output_root)
+    metadata_path = Path(metadata_path)
+    source_paths = [Path(path) for path in source_paths]
+    if output_root.exists():
+        raise RuntimeError(f"Refusing to overwrite output directory: {output_root}")
+    if reload_predict is None:
+        reload_predict = _reload_catboost_probabilities
+
+    _require_columns(data, METADATA_COLUMNS, "data")
+    expected_windows = len(data)
+    expected_records = data["group_id"].nunique()
     feature_names = [column for column in data.columns if column not in METADATA_COLUMNS]
     if len(feature_names) != 63 or len(set(feature_names)) != 63:
         raise ValueError("Complete source must contain exactly 63 unique features")
@@ -427,18 +451,21 @@ def main() -> None:
     records = data.loc[:, RECORD_METADATA_COLUMNS].drop_duplicates()
     assignment = build_record_assignment(records, test_fraction=0.2, seed=42)
     assigned = validate_no_leakage(data, assignment)
-    if assigned["group_id"].nunique() != 1_845 or len(assigned) != 219_555:
+    if (
+        assigned["group_id"].nunique() != expected_records
+        or len(assigned) != expected_windows
+    ):
         raise RuntimeError("Record assignment did not retain the complete dataset")
     train = assigned.loc[assigned["subset"].eq("train")].copy()
     test = assigned.loc[assigned["subset"].eq("test")].copy()
     if set(train["group_id"]).intersection(test["group_id"]):
         raise RuntimeError("Record leakage detected after assignment")
 
-    OUTPUT_ROOT.mkdir(parents=True)
-    assignment_path = OUTPUT_ROOT / "record_assignment.csv"
+    output_root.mkdir(parents=True)
+    assignment_path = output_root / "record_assignment.csv"
     assignment.to_csv(assignment_path, index=False, encoding="utf-8-sig")
     split_distribution(assignment).to_csv(
-        OUTPUT_ROOT / "split_distribution.csv", index=False, encoding="utf-8-sig"
+        output_root / "split_distribution.csv", index=False, encoding="utf-8-sig"
     )
     assignment_sha256 = _sha256(assignment_path)
     source_sha256 = {str(path): _sha256(path) for path in source_paths}
@@ -446,24 +473,19 @@ def main() -> None:
 
     comparison_rows = []
     for channel in ("3", "4", "5"):
-        channel_dir = OUTPUT_ROOT / f"ch{channel}"
+        channel_dir = output_root / f"ch{channel}"
         channel_dir.mkdir()
         features = select_channel_features(feature_names, channel)
-        model, probabilities = fit_channel_model(
-            train, test, features, channel
-        )
+        model, probabilities = fit_model(train, test, features, channel)
         classes = list(model.classes_)
         model_path = channel_dir / f"ch{channel}_catboost.cbm"
         model.save_model(str(model_path))
 
-        restored = CatBoostClassifier()
-        restored.load_model(str(model_path))
-        if list(restored.feature_names_) != features:
-            raise RuntimeError("Reloaded model feature order differs")
-        restored_probabilities = restored.predict_proba(
-            Pool(test.loc[:, features], test["label"]),
-            thread_count=FIXED_PARAMS["thread_count"],
+        restored_features, restored_probabilities = reload_predict(
+            model_path, test, features
         )
+        if list(restored_features) != features:
+            raise RuntimeError("Reloaded model feature order differs")
         np.testing.assert_allclose(
             probabilities, restored_probabilities, rtol=0, atol=1e-12
         )
@@ -534,9 +556,9 @@ def main() -> None:
         )
 
     comparison = pd.DataFrame(comparison_rows)
-    comparison.to_csv(OUTPUT_ROOT / "comparison.csv", index=False, encoding="utf-8-sig")
+    comparison.to_csv(output_root / "comparison.csv", index=False, encoding="utf-8-sig")
     _write_json(
-        OUTPUT_ROOT / "summary.json",
+        output_root / "summary.json",
         {
             "purpose": "same-file record-level evaluation",
             "channels": ["3", "4", "5"],
@@ -548,6 +570,25 @@ def main() -> None:
             "assignment_sha256": assignment_sha256,
             "results": comparison_rows,
         },
+    )
+
+
+def main() -> None:
+    """Run the fixed three-model experiment; intentionally not called on import."""
+    if OUTPUT_ROOT.exists():
+        raise RuntimeError(f"Refusing to overwrite output directory: {OUTPUT_ROOT}")
+
+    data, source_paths = load_complete_feature_table(SOURCE_ROOT)
+    metadata_path = SOURCE_ROOT / "window_metadata.csv"
+    if len(data) != 219_555 or data["group_id"].nunique() != 1_845:
+        raise ValueError(
+            "Complete source must contain 219,555 windows and 1,845 records"
+        )
+    run_experiment(
+        data,
+        source_paths,
+        metadata_path,
+        OUTPUT_ROOT,
     )
 
 
