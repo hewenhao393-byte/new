@@ -1,8 +1,18 @@
+import sys
+import types
+
+import numpy as np
 import pandas as pd
 import pytest
 
 from tools.record_level_single_channel_catboost import (
+    FIXED_PARAMS,
     build_record_assignment,
+    compute_classification_metrics,
+    fit_channel_model,
+    fuse_record_probabilities,
+    load_complete_feature_table,
+    select_channel_features,
     split_distribution,
     validate_no_leakage,
 )
@@ -219,3 +229,248 @@ def test_split_distribution_counts_records_and_files(example_assignment):
     assert distribution.columns.tolist() == expected_columns
     assert distribution["records"].sum() == len(example_assignment)
     assert (distribution["files"] == 1).all()
+
+
+@pytest.fixture
+def formal_feature_names():
+    base = [f"feature_{index:02d}" for index in range(21)]
+    return [f"ch{channel}_{name}" for channel in (3, 4, 5) for name in base]
+
+
+@pytest.mark.parametrize("channel", ["3", "4", "5"])
+def test_select_channel_features_returns_exact_source_order(
+    formal_feature_names, channel
+):
+    selected = select_channel_features(formal_feature_names, channel)
+
+    assert len(selected) == 21
+    assert selected == [
+        name for name in formal_feature_names if name.startswith(f"ch{channel}_")
+    ]
+
+
+def test_select_channel_features_rejects_unsupported_channel(formal_feature_names):
+    with pytest.raises(ValueError, match="Unsupported channel"):
+        select_channel_features(formal_feature_names, "2")
+
+
+def test_select_channel_features_rejects_incomplete_or_duplicate_names(
+    formal_feature_names,
+):
+    incomplete = formal_feature_names[:-1]
+    duplicate = formal_feature_names + [formal_feature_names[0]]
+
+    with pytest.raises(ValueError, match="21 unique"):
+        select_channel_features(incomplete, "5")
+    with pytest.raises(ValueError, match="Duplicate feature names"):
+        select_channel_features(duplicate, "3")
+
+
+def test_select_channel_features_ignores_channel_path_metadata(formal_feature_names):
+    names = ["group_id", "ch3_path", *formal_feature_names, "ch4_path", "ch5_path"]
+
+    selected = select_channel_features(names, "3")
+
+    assert len(selected) == 21
+    assert "ch3_path" not in selected
+
+
+def test_fuse_record_probabilities_averages_windows_and_preserves_truth():
+    frame = pd.DataFrame(
+        {
+            "group_id": ["a", "a", "b"],
+            "true_label": ["正常", "正常", "汽蚀"],
+            "正常": [0.8, 0.6, 0.1],
+            "汽蚀": [0.2, 0.4, 0.9],
+        }
+    )
+
+    fused = fuse_record_probabilities(frame, ["正常", "汽蚀"])
+
+    assert fused.index.tolist() == ["a", "b"]
+    assert fused.loc["a", "正常"] == pytest.approx(0.7)
+    assert fused.loc["a", "predicted_label"] == "正常"
+    assert fused.loc["b", "true_label"] == "汽蚀"
+
+
+def test_fuse_record_probabilities_rejects_invalid_input():
+    missing_class = pd.DataFrame({"group_id": ["a"], "正常": [1.0]})
+    non_finite = pd.DataFrame(
+        {"group_id": ["a"], "正常": [np.nan], "汽蚀": [0.0]}
+    )
+    inconsistent_truth = pd.DataFrame(
+        {
+            "group_id": ["a", "a"],
+            "true_label": ["正常", "汽蚀"],
+            "正常": [0.8, 0.7],
+            "汽蚀": [0.2, 0.3],
+        }
+    )
+    missing_truth = pd.DataFrame(
+        {
+            "group_id": ["a"],
+            "true_label": [None],
+            "正常": [0.8],
+            "汽蚀": [0.2],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Missing columns"):
+        fuse_record_probabilities(missing_class, ["正常", "汽蚀"])
+    with pytest.raises(ValueError, match="finite"):
+        fuse_record_probabilities(non_finite, ["正常", "汽蚀"])
+    with pytest.raises(ValueError, match="true label"):
+        fuse_record_probabilities(inconsistent_truth, ["正常", "汽蚀"])
+    with pytest.raises(ValueError, match="true label"):
+        fuse_record_probabilities(missing_truth, ["正常", "汽蚀"])
+
+
+def test_fixed_params_match_frozen_experiment_contract():
+    assert FIXED_PARAMS == {
+        "loss_function": "MultiClass",
+        "iterations": 540,
+        "depth": 8,
+        "learning_rate": 0.05,
+        "l2_leaf_reg": 100,
+        "random_strength": 5,
+        "rsm": 0.7,
+        "auto_class_weights": "SqrtBalanced",
+        "random_seed": 42,
+        "thread_count": 4,
+        "allow_writing_files": False,
+    }
+
+
+def test_fit_channel_model_uses_exact_feature_order(monkeypatch, formal_feature_names):
+    features = select_channel_features(formal_feature_names, "3")
+    train = pd.DataFrame(
+        [[0.0] * 21, [1.0] * 21], columns=features
+    ).assign(label=["正常", "汽蚀"])
+    test = pd.DataFrame([[0.5] * 21], columns=features).assign(label=["正常"])
+    calls = {}
+
+    class FakePool:
+        def __init__(self, data, label=None):
+            calls.setdefault("pool_columns", []).append(data.columns.tolist())
+            self.data = data
+            self.label = label
+
+    class FakeModel:
+        def __init__(self, **params):
+            calls["params"] = params
+            self.feature_names_ = []
+            self.classes_ = np.array(["正常", "汽蚀"])
+
+        def fit(self, pool, verbose=None):
+            calls["fit_verbose"] = verbose
+            self.feature_names_ = pool.data.columns.tolist()
+            return self
+
+        def predict_proba(self, pool, thread_count=None):
+            calls["predict_thread_count"] = thread_count
+            return np.tile([0.75, 0.25], (len(pool.data), 1))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "catboost",
+        types.SimpleNamespace(CatBoostClassifier=FakeModel, Pool=FakePool),
+    )
+
+    model, probabilities = fit_channel_model(train, test, features, "3")
+
+    assert model.feature_names_ == features
+    assert calls["pool_columns"] == [features, features]
+    assert calls["params"] == FIXED_PARAMS
+    assert probabilities.shape == (1, 2)
+
+
+def test_fit_channel_model_rejects_wrong_channel_feature_order(formal_feature_names):
+    features = select_channel_features(formal_feature_names, "3")
+    train = pd.DataFrame([[0.0] * 21], columns=features).assign(label=["正常"])
+    test = train.copy()
+
+    with pytest.raises(ValueError, match="feature order"):
+        fit_channel_model(train, test, list(reversed(features)), "3")
+
+
+def test_compute_classification_metrics_has_full_contract():
+    labels = ["正常", "汽蚀"]
+    metrics = compute_classification_metrics(
+        ["正常", "正常", "汽蚀"],
+        ["正常", "汽蚀", "汽蚀"],
+        labels,
+    )
+
+    assert metrics["label_order"] == labels
+    assert metrics["accuracy"] == pytest.approx(2 / 3)
+    assert metrics["balanced_accuracy"] == pytest.approx(0.75)
+    assert metrics["macro_f1"] == pytest.approx(2 / 3)
+    assert set(labels).issubset(metrics["classification_report"])
+    assert metrics["confusion_matrix"] == [[1, 1], [0, 1]]
+
+
+def test_load_complete_feature_table_prefers_and_validates_full_table(
+    tmp_path, formal_feature_names
+):
+    metadata = pd.DataFrame(
+        {
+            "group_id": ["a", "b"],
+            "record_column": ["0", "1"],
+            "device_id": ["Motor-2", "Motor-4"],
+            "speed_percent": [100, 70],
+            "rpm": [1480, 2070],
+            "label": ["正常", "汽蚀"],
+            "window_id": [0, 0],
+            "window_start": [0, 0],
+            "window_end": [2400, 2400],
+            "ch3_path": ["a3", "b3"],
+            "ch4_path": ["a4", "b4"],
+            "ch5_path": ["a5", "b5"],
+        }
+    )
+    features = metadata.copy()
+    for index, name in enumerate(formal_feature_names):
+        features[name] = float(index)
+    metadata.to_csv(tmp_path / "window_metadata.csv", index=False)
+    features.to_csv(tmp_path / "channel345_fused_features.csv", index=False)
+
+    loaded, sources = load_complete_feature_table(tmp_path)
+
+    assert loaded.shape == features.shape
+    assert loaded["group_id"].tolist() == ["a", "b"]
+    assert sources == [tmp_path / "channel345_fused_features.csv"]
+
+
+def test_load_complete_feature_table_combines_disjoint_legacy_splits(tmp_path):
+    split = tmp_path / "file_group_holdout_80_20"
+    split.mkdir()
+    metadata = pd.DataFrame(
+        {
+            "group_id": ["a", "b"],
+            "record_column": ["0", "1"],
+            "device_id": ["Motor-2", "Motor-4"],
+            "speed_percent": [100, 70],
+            "rpm": [1480, 2070],
+            "label": ["正常", "汽蚀"],
+            "window_id": [0, 0],
+            "window_start": [0, 0],
+            "window_end": [2400, 2400],
+            "ch3_path": ["a3", "b3"],
+            "ch4_path": ["a4", "b4"],
+            "ch5_path": ["a5", "b5"],
+            "ch3_feature": [0.1, 0.2],
+        }
+    )
+    metadata.iloc[[0]].to_csv(split / "train_features_63.csv", index=False)
+    metadata.iloc[[1]].to_csv(split / "test_features_63.csv", index=False)
+    metadata.drop(columns="ch3_feature").to_csv(
+        tmp_path / "window_metadata.csv", index=False
+    )
+
+    loaded, sources = load_complete_feature_table(tmp_path)
+
+    assert loaded["group_id"].tolist() == ["a", "b"]
+    assert sources == [
+        split / "train_features_63.csv",
+        split / "test_features_63.csv",
+    ]
