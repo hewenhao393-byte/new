@@ -99,6 +99,21 @@ def test_split_rejects_missing_required_columns(example_records):
         build_record_assignment(example_records.drop(columns="ch5_path"))
 
 
+def test_split_rejects_source_file_with_fewer_than_two_records(example_records):
+    single_record = example_records.iloc[[0]].copy()
+
+    with pytest.raises(ValueError, match="fewer than two records"):
+        build_record_assignment(single_record)
+
+
+@pytest.mark.parametrize("test_fraction", [-0.1, 0, 1, 1.1])
+def test_split_rejects_test_fraction_outside_open_interval(
+    example_records, test_fraction
+):
+    with pytest.raises(ValueError, match="strictly between 0 and 1"):
+        build_record_assignment(example_records, test_fraction=test_fraction)
+
+
 def test_split_rejects_conflicting_group_metadata(example_records):
     conflicting = pd.concat(
         [example_records, example_records.iloc[[0]].assign(label="轴承故障")],

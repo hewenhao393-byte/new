@@ -53,8 +53,8 @@ def build_record_assignment(
 ) -> pd.DataFrame:
     """Assign complete 12-second records to train/test within each source file."""
     _require_columns(records, RECORD_METADATA_COLUMNS, "records")
-    if not 0 <= test_fraction <= 1:
-        raise ValueError("test_fraction must be between 0 and 1")
+    if not 0 < test_fraction < 1:
+        raise ValueError("test_fraction must be strictly between 0 and 1")
 
     metadata = records.loc[:, RECORD_METADATA_COLUMNS].drop_duplicates().copy()
     conflicting = metadata["group_id"].duplicated(keep=False)
@@ -66,6 +66,8 @@ def build_record_assignment(
     parts = []
     for source_path, group in unique.groupby("ch4_path", sort=True, dropna=False):
         group = group.sort_values("group_id", kind="stable").reset_index(drop=True)
+        if len(group) < 2:
+            raise ValueError(f"Source file has fewer than two records: {source_path}")
         rng = np.random.default_rng(_stable_local_seed(seed, source_path))
         shuffled = group.iloc[rng.permutation(len(group))].copy()
         test_count = min(len(group) - 1, max(1, round(len(group) * test_fraction)))
