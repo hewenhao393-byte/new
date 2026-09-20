@@ -124,38 +124,92 @@ def assess_ch5_unique_value(recalls: pd.DataFrame) -> dict:
 def recommend_new_features(confusion_evidence: pd.DataFrame, effects: pd.DataFrame) -> dict:
     """Apply the conservative conjunction for proposing a later feature study.
 
-    ``principal`` is supplied by the caller's confusion audit. Weak effects mean
-    at least two thirds of the pre-specified diagnostic effects are negligible
-    or small. The function never infers causality from either condition.
+    A directional error is principal when it occurs and is at least as frequent
+    as the largest competing off-diagonal error for that actual class. Every
+    channel/split/scope must pass in both directions. Weak effects require exact
+    43-feature, non-small-sample coverage and a strict majority below 0.147 for
+    each directional comparison. No causal inference is made.
     """
-    required = {"scope", "looseness_to_bearing_principal", "bearing_to_looseness_principal"}
+    count_columns = {
+        "looseness_to_bearing_count",
+        "looseness_other_max_offdiag_count",
+        "bearing_to_looseness_count",
+        "bearing_other_max_offdiag_count",
+    }
+    required = {"channel", "split_mode", "scope", *count_columns}
     missing = sorted(required - set(confusion_evidence.columns))
     if missing:
         raise ValueError(f"confusion evidence missing required columns: {missing}")
     scopes = {"train_internal_cv", "test_window", "test_record"}
+    expected = {(c, split, scope) for c in CHANNELS for split in SPLIT_MODES for scope in scopes}
     if (
-        len(confusion_evidence) != 3
-        or confusion_evidence["scope"].duplicated().any()
-        or set(confusion_evidence["scope"]) != scopes
+        len(confusion_evidence) != len(expected)
+        or confusion_evidence.duplicated(["channel", "split_mode", "scope"]).any()
+        or set(zip(confusion_evidence["channel"], confusion_evidence["split_mode"], confusion_evidence["scope"])) != expected
     ):
-        raise ValueError("confusion evidence must cover exactly the three prescribed scopes")
-    if "magnitude" not in effects.columns or effects.empty:
-        raise ValueError("diagnostic effects must contain non-empty magnitude values")
-    allowed = {"negligible", "small", "medium", "large"}
-    if not set(effects["magnitude"]).issubset(allowed):
-        raise ValueError("unknown diagnostic effect magnitude")
-    bidirectional = confusion_evidence[
+        raise ValueError("confusion evidence must cover exactly channel x split x three scopes")
+    numeric = confusion_evidence[list(count_columns)].to_numpy(dtype=float)
+    if not np.isfinite(numeric).all() or (numeric < 0).any():
+        raise ValueError("confusion counts must be finite and nonnegative")
+    evidence = confusion_evidence.copy()
+    evidence["looseness_to_bearing_principal"] = (
+        evidence["looseness_to_bearing_count"].gt(0)
+        & evidence["looseness_to_bearing_count"].ge(evidence["looseness_other_max_offdiag_count"])
+    )
+    evidence["bearing_to_looseness_principal"] = (
+        evidence["bearing_to_looseness_count"].gt(0)
+        & evidence["bearing_to_looseness_count"].ge(evidence["bearing_other_max_offdiag_count"])
+    )
+    evidence["bidirectional_principal"] = evidence[
         ["looseness_to_bearing_principal", "bearing_to_looseness_principal"]
-    ].eq(True).all(axis=1)
-    failed = confusion_evidence.loc[~bidirectional, "scope"].tolist()
-    weak_share = float(effects["magnitude"].isin(["negligible", "small"]).mean())
-    weak = weak_share >= (2.0 / 3.0)
-    if not weak:
-        failed.append("diagnostic_effects_generally_weak")
+    ].all(axis=1)
+    failed = [
+        f"CH{row.channel}/{row.split_mode}/{row.scope}"
+        for row in evidence.loc[~evidence["bidirectional_principal"]].itertuples(index=False)
+    ]
+
+    effect_required = {"channel", "split_mode", "feature", "group_a", "group_b", "abs_delta", "small_sample"}
+    missing_effect = sorted(effect_required - set(effects.columns))
+    if missing_effect:
+        raise ValueError(f"diagnostic effects missing required columns: {missing_effect}")
+    try:
+        effect_values = effects["abs_delta"].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("diagnostic abs_delta must be numeric") from exc
+    if not np.isfinite(effect_values).all() or (effect_values < 0).any():
+        raise ValueError("diagnostic abs_delta must be finite and nonnegative")
+    comparisons = {
+        ("correct_looseness", "looseness_to_bearing"),
+        ("correct_bearing", "bearing_to_looseness"),
+    }
+    relevant = effects[
+        effects[["group_a", "group_b"]].apply(tuple, axis=1).isin(comparisons)
+    ].copy()
+    effect_rows = []
+    for channel in CHANNELS:
+        for split in SPLIT_MODES:
+            for group_a, group_b in sorted(comparisons):
+                subset = relevant[
+                    (relevant.channel == channel) & (relevant.split_mode == split)
+                    & (relevant.group_a == group_a) & (relevant.group_b == group_b)
+                ]
+                coverage_ok = len(subset) == 43 and subset["feature"].nunique() == 43
+                sample_ok = coverage_ok and not subset["small_sample"].astype(bool).any()
+                weak_share = float(subset["abs_delta"].lt(0.147).mean()) if coverage_ok else 0.0
+                weak_majority = sample_ok and weak_share > 0.5
+                effect_rows.append({
+                    "channel": channel, "split_mode": split, "group_a": group_a, "group_b": group_b,
+                    "feature_count": len(subset), "coverage_ok": coverage_ok, "sample_ok": sample_ok,
+                    "weak_effect_share": weak_share, "weak_effect_majority": weak_majority,
+                })
+                if not weak_majority:
+                    failed.append(f"CH{channel}/{split}/{group_a}_vs_{group_b}/weak_effects")
+    effect_evidence = pd.DataFrame(effect_rows)
     return {
         "recommend_new_features": not failed,
         "failed_conditions": failed,
-        "weak_effect_share": weak_share,
+        "confusion_evidence": evidence,
+        "effect_evidence": effect_evidence,
     }
 
 
@@ -163,10 +217,39 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _directional_from_confusion(confusion, channel, split, scope, feature_set) -> dict:
+    matrix = np.asarray(confusion, dtype=float)
+    if matrix.shape != (len(LABEL_ORDER), len(LABEL_ORDER)) or not np.isfinite(matrix).all() or (matrix < 0).any():
+        raise ValueError("confusion matrix must be finite, nonnegative, and 6x6")
+    looseness = LABEL_ORDER.index("松动")
+    bearing = LABEL_ORDER.index("轴承故障")
+
+    def values(actual, target, actual_name, direction):
+        total = float(matrix[actual].sum())
+        count = float(matrix[actual, target])
+        other = max(
+            [float(matrix[actual, predicted]) for predicted in range(len(LABEL_ORDER)) if predicted not in {actual, target}],
+            default=0.0,
+        )
+        return {
+            f"{actual_name}_actual_count": total,
+            f"{direction}_count": count,
+            f"{direction}_rate": count / total if total else 0.0,
+            f"{actual_name}_other_max_offdiag_count": other,
+        }
+
+    return {
+        "channel": channel, "split_mode": split, "scope": scope, "feature_set": feature_set,
+        **values(looseness, bearing, "looseness", "looseness_to_bearing"),
+        **values(bearing, looseness, "bearing", "bearing_to_looseness"),
+    }
+
+
 def _load_model_artifacts(staging: Path):
     metric_rows = []
     recall_rows = []
     curve_rows = []
+    confusion_rows = []
     for channel in CHANNELS:
         for split in SPLIT_MODES:
             for feature_set in FEATURE_SETS:
@@ -215,7 +298,38 @@ def _load_model_artifacts(staging: Path):
                                 "recall": float(report[label]["recall"]),
                             }
                         )
-    return pd.DataFrame(metric_rows), pd.DataFrame(recall_rows), pd.concat(curve_rows, ignore_index=True)
+                fold_scores = pd.read_csv(run / "internal_cv_fold_scores.csv")
+                selected_folds = fold_scores[fold_scores["iteration"].eq(selected)]
+                directional = [
+                    "looseness_actual_count", "looseness_to_bearing_count", "looseness_other_max_offdiag_count",
+                    "bearing_actual_count", "bearing_to_looseness_count", "bearing_other_max_offdiag_count",
+                ]
+                if len(selected_folds) == 0 or not set(directional).issubset(selected_folds.columns):
+                    raise ValueError(f"selected CV directional confusion evidence missing in {run}")
+                summed = selected_folds[directional].sum()
+                cv_row = {
+                    "channel": channel, "split_mode": split, "scope": "train_internal_cv", "feature_set": feature_set,
+                    **{column: float(summed[column]) for column in directional},
+                }
+                cv_row["looseness_to_bearing_rate"] = (
+                    cv_row["looseness_to_bearing_count"] / cv_row["looseness_actual_count"]
+                    if cv_row["looseness_actual_count"] else 0.0
+                )
+                cv_row["bearing_to_looseness_rate"] = (
+                    cv_row["bearing_to_looseness_count"] / cv_row["bearing_actual_count"]
+                    if cv_row["bearing_actual_count"] else 0.0
+                )
+                confusion_rows.append(cv_row)
+                confusion_rows.append(_directional_from_confusion(
+                    window["confusion_matrix"], channel, split, "test_window", feature_set
+                ))
+                confusion_rows.append(_directional_from_confusion(
+                    record["confusion_matrix"], channel, split, "test_record", feature_set
+                ))
+    return (
+        pd.DataFrame(metric_rows), pd.DataFrame(recall_rows), pd.concat(curve_rows, ignore_index=True),
+        pd.DataFrame(confusion_rows),
+    )
 
 
 def _build_deltas(metrics: pd.DataFrame, recalls: pd.DataFrame) -> pd.DataFrame:
@@ -250,6 +364,20 @@ def _build_deltas(metrics: pd.DataFrame, recalls: pd.DataFrame) -> pd.DataFrame:
             )
             rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _build_class_recall_deltas(recalls: pd.DataFrame) -> pd.DataFrame:
+    wide = recalls.pivot(
+        index=["channel", "split_mode", "evaluation_level", "class"],
+        columns="feature_set", values="recall",
+    ).reset_index()
+    if len(wide) != len(CHANNELS) * len(SPLIT_MODES) * len(LEVELS) * len(LABEL_ORDER):
+        raise ValueError("class recall delta coverage is incomplete")
+    wide["recall_delta_40_minus_43"] = wide["features_40"] - wide["features_43"]
+    return wide[[
+        "channel", "split_mode", "evaluation_level", "class",
+        "features_43", "features_40", "recall_delta_40_minus_43",
+    ]]
 
 
 def _aggregate_diagnostics(diagnostic_tables: Mapping):
@@ -324,6 +452,7 @@ def _write_conclusion(
     decision: dict,
     effects: pd.DataFrame,
     concentration: pd.DataFrame,
+    new_feature_decision: dict,
 ) -> None:
     chosen = decision["recommended_feature_set"]
     selected = metrics[metrics.feature_set == chosen]
@@ -343,13 +472,18 @@ def _write_conclusion(
         f"- CH{row.channel} / {row.split_mode} / {row.evaluation_level} / {row['class']}: Recall={row.recall:.4f}"
         for _, row in chosen_recalls.iterrows()
     )
-    weak_share = float(effects["magnitude"].isin(["negligible", "small"]).mean()) if len(effects) else float("nan")
+    weak_share = float(new_feature_decision["effect_evidence"]["weak_effect_share"].mean())
     top5_mean = float(concentration["top5_share"].mean()) if len(concentration) else float("nan")
     unique_text = "、".join(unique["unique_classes"]) if unique["unique_classes"] else "无"
     delta_lines = "\n".join(
         f"- CH{row.channel} / {row.split_mode}: record Macro-F1={row.record_macro_f1_delta:+.4f}，松动Recall={row.looseness_recall_delta:+.4f}，轴承故障Recall={row.bearing_recall_delta:+.4f}"
         for row in deltas.itertuples(index=False)
     )
+    if new_feature_decision["recommend_new_features"]:
+        new_feature_text = "三层双向主要混淆与弱效应条件均满足，**建议开展新特征研究**。"
+    else:
+        failures = "；".join(new_feature_decision["failed_conditions"])
+        new_feature_text = f"严格合取条件未全部满足，**不建议仅据现有证据新增特征**。未满足项：{failures}。"
     text = f"""# 43维与40维去冗余消融结论
 
 ## 训练内部 CV（仅用于轮数选择）
@@ -383,7 +517,8 @@ CH5 只在 record 和 temporal 两种划分上都严格高于 CH3、CH4 时，�
 ## 松动/轴承故障效应量、集中度与是否需要新特征
 
 定向 Cliff's delta 中可忽略或小效应的比例为 {weak_share:.1%}；六组定向错分的前5个record平均集中度为 {top5_mean:.1%}。
-保守规则要求：松动→轴承故障与轴承故障→松动必须同时是训练内部 CV、独立测试窗口级和独立测试 record 级的主要双向混淆，且诊断效应量总体偏弱，两项同时满足才建议新特征。现有内部 CV 工件只保存轮数分数，未保存折外类别错分方向，因而不能确证第一项；本次 **不建议仅据现有证据新增特征**。
+保守规则要求：在 CH3/CH4/CH5 与 record/temporal 六组中，松动→轴承故障与轴承故障→松动都必须至少出现一次，且其计数不低于该真实类别流向任一其他错误类别的最大计数；该条件必须同时出现在训练内部 CV 选定轮数、独立测试窗口级和独立测试 record 级。同时，两个定向比较在每组均必须具备 43 特征完整、非小样本覆盖，且严格多数 `|Cliff's delta| < 0.147`。{new_feature_text}
+机器可读决策与逐组证据见 `comparison/new_feature_decision.csv` 和 `comparison/new_feature_evidence.csv`。
 
 ## 解释边界
 
@@ -419,26 +554,48 @@ def generate_reports(
         redundancy_dir / "feature_decisions_43_to_40.csv", index=False, encoding="utf-8-sig"
     )
 
-    metrics, recalls, curves = _load_model_artifacts(staging)
+    metrics, recalls, curves, confusion_evidence = _load_model_artifacts(staging)
     deltas = _build_deltas(metrics, recalls)
+    class_recall_deltas = _build_class_recall_deltas(recalls)
     decision = recommend_feature_set(deltas[_DELTA_REQUIRED])
     chosen_recalls = recalls[recalls.feature_set.eq(decision["recommended_feature_set"])].copy()
     record_recalls = chosen_recalls[chosen_recalls.evaluation_level.eq("record")][
         ["channel", "split_mode", "class", "recall"]
     ]
     unique = assess_ch5_unique_value(record_recalls)
+    chosen_confusion = confusion_evidence[
+        confusion_evidence.feature_set.eq(decision["recommended_feature_set"])
+    ].drop(columns="feature_set")
+    new_feature_decision = recommend_new_features(chosen_confusion, effects)
 
     curves.to_csv(iteration_dir / "all_iteration_curves.csv", index=False, encoding="utf-8-sig")
     metrics.to_csv(comparison_dir / "ablation_metrics.csv", index=False, encoding="utf-8-sig")
     deltas.to_csv(comparison_dir / "ablation_deltas.csv", index=False, encoding="utf-8-sig")
     recalls.to_csv(comparison_dir / "channel_class_recall.csv", index=False, encoding="utf-8-sig")
+    class_recall_deltas.to_csv(comparison_dir / "class_recall_deltas.csv", index=False, encoding="utf-8-sig")
     unique["table"].to_csv(comparison_dir / "ch5_unique_value.csv", index=False, encoding="utf-8-sig")
+    evidence = new_feature_decision["confusion_evidence"].copy()
+    evidence["evidence_type"] = "confusion"
+    effect_evidence = new_feature_decision["effect_evidence"].copy()
+    effect_evidence["evidence_type"] = "effect_size"
+    pd.concat([evidence, effect_evidence], ignore_index=True, sort=False).to_csv(
+        comparison_dir / "new_feature_evidence.csv", index=False, encoding="utf-8-sig"
+    )
+    pd.DataFrame([{
+        "recommend_new_features": new_feature_decision["recommend_new_features"],
+        "recommended_feature_set": decision["recommended_feature_set"],
+        "rule": "all 18 scopes bidirectionally principal AND all 12 effect comparisons complete, non-small-sample, weak-majority",
+        "failed_conditions_json": json.dumps(new_feature_decision["failed_conditions"], ensure_ascii=False),
+        "confusion_evidence_json": new_feature_decision["confusion_evidence"].to_json(orient="records", force_ascii=False),
+        "effect_evidence_json": new_feature_decision["effect_evidence"].to_json(orient="records", force_ascii=False),
+    }]).to_csv(comparison_dir / "new_feature_decision.csv", index=False, encoding="utf-8-sig")
     _plot_iteration_curves(curves, staging / "figures" / "iteration_curves")
     _plot_class_recalls(recalls, staging / "figures" / "class_recall")
     _write_conclusion(
-        staging / "conclusion.md", metrics, deltas, chosen_recalls, unique, decision, effects, concentration
+        staging / "conclusion.md", metrics, deltas, chosen_recalls, unique, decision, effects, concentration,
+        new_feature_decision,
     )
-    return {"decision": decision, "ch5_unique_value": unique}
+    return {"decision": decision, "ch5_unique_value": unique, "new_feature_decision": new_feature_decision}
 
 
 REPORT_REQUIRED_FILES = (
@@ -452,6 +609,9 @@ REPORT_REQUIRED_FILES = (
     "comparison/ablation_metrics.csv",
     "comparison/ablation_deltas.csv",
     "comparison/channel_class_recall.csv",
+    "comparison/class_recall_deltas.csv",
     "comparison/ch5_unique_value.csv",
+    "comparison/new_feature_decision.csv",
+    "comparison/new_feature_evidence.csv",
     "conclusion.md",
 )

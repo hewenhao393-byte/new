@@ -19,6 +19,16 @@ from .config import CV_SPLITS, ITERATION_GRID, LABEL_ORDER, MAX_ITERATIONS, MODE
 _FUSION_META = ["record_id", "label", "motor", "rpm", "condition", "state", "severity"]
 _RECORD_CONTRACT = ["label", "motor", "rpm", "condition", "state", "severity"]
 _MANIFEST_COLUMNS = ["fold", "role", "record_id", "fold_sha256"]
+_DIRECTIONAL_COLUMNS = [
+    "looseness_actual_count",
+    "looseness_to_bearing_count",
+    "looseness_to_bearing_rate",
+    "looseness_other_max_offdiag_count",
+    "bearing_actual_count",
+    "bearing_to_looseness_count",
+    "bearing_to_looseness_rate",
+    "bearing_other_max_offdiag_count",
+]
 _FORBIDDEN_FEATURES = set(
     _FUSION_META
     + [
@@ -201,14 +211,40 @@ def staged_record_scores(model, validation, feature_names, checkpoints, classes)
         probability_frame["predicted_label"] = [classes[index] for index in probabilities.argmax(axis=1)]
         fused = fuse_records(probability_frame, classes)
         metrics = evaluate_predictions(fused["label"], fused["predicted_label"], LABEL_ORDER)
-        rows.append({"iteration": iteration, "record_macro_f1": metrics["macro_f1"]})
+        confusion = np.asarray(metrics["confusion_matrix"], dtype=int)
+        looseness = LABEL_ORDER.index("松动")
+        bearing = LABEL_ORDER.index("轴承故障")
+
+        def directional(actual_index, target_index, actual_name, direction_name):
+            actual_count = int(confusion[actual_index].sum())
+            target_count = int(confusion[actual_index, target_index])
+            competitors = [
+                int(confusion[actual_index, predicted])
+                for predicted in range(len(LABEL_ORDER))
+                if predicted not in {actual_index, target_index}
+            ]
+            return {
+                f"{actual_name}_actual_count": actual_count,
+                f"{direction_name}_count": target_count,
+                f"{direction_name}_rate": target_count / actual_count if actual_count else 0.0,
+                f"{actual_name}_other_max_offdiag_count": max(competitors, default=0),
+            }
+
+        rows.append(
+            {
+                "iteration": iteration,
+                "record_macro_f1": metrics["macro_f1"],
+                **directional(looseness, bearing, "looseness", "looseness_to_bearing"),
+                **directional(bearing, looseness, "bearing", "bearing_to_looseness"),
+            }
+        )
         if iteration >= checkpoints[-1]:
             break
     if seen_last < checkpoints[-1] or len(rows) != len(checkpoints):
         raise ValueError(
             f"incomplete checkpoint stream: required through {checkpoints[-1]}, received through {seen_last}"
         )
-    return pd.DataFrame(rows, columns=["iteration", "record_macro_f1"])
+    return pd.DataFrame(rows, columns=["iteration", "record_macro_f1", *_DIRECTIONAL_COLUMNS])
 
 
 def aggregate_cv_scores(fold_scores: pd.DataFrame) -> pd.DataFrame:

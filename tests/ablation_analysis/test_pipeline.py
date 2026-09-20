@@ -207,7 +207,10 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
         "comparison/ablation_metrics.csv",
         "comparison/ablation_deltas.csv",
         "comparison/channel_class_recall.csv",
+        "comparison/class_recall_deltas.csv",
         "comparison/ch5_unique_value.csv",
+        "comparison/new_feature_decision.csv",
+        "comparison/new_feature_evidence.csv",
         "conclusion.md",
     }
     assert all((output / relative).is_file() for relative in report_files)

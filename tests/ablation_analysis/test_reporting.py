@@ -100,19 +100,58 @@ def test_ch5_unique_value_validates_exact_coverage():
         assess_ch5_unique_value(malformed)
 
 
+def _confusion_evidence(principal=True):
+    return pd.DataFrame([
+        {
+            "channel": channel, "split_mode": split, "scope": scope,
+            "looseness_to_bearing_count": 2 if principal else 0,
+            "looseness_to_bearing_rate": 0.2 if principal else 0.0,
+            "looseness_other_max_offdiag_count": 1,
+            "bearing_to_looseness_count": 2,
+            "bearing_to_looseness_rate": 0.2,
+            "bearing_other_max_offdiag_count": 1,
+        }
+        for channel in (3, 4, 5)
+        for split in ("record", "temporal")
+        for scope in ("train_internal_cv", "test_window", "test_record")
+    ])
+
+
+def _complete_effects(weak=True):
+    comparisons = [
+        ("correct_looseness", "looseness_to_bearing"),
+        ("correct_bearing", "bearing_to_looseness"),
+    ]
+    return pd.DataFrame([
+        {
+            "channel": channel, "split_mode": split, "feature": f"f{feature}",
+            "group_a": group_a, "group_b": group_b, "abs_delta": 0.1 if weak or feature < 21 else 0.2,
+            "small_sample": False,
+        }
+        for channel in (3, 4, 5)
+        for split in ("record", "temporal")
+        for group_a, group_b in comparisons
+        for feature in range(43)
+    ])
+
+
 def test_new_features_require_all_three_bidirectional_confusion_scopes_and_weak_effects():
-    evidence = pd.DataFrame(
-        [
-            {"scope": scope, "looseness_to_bearing_principal": True, "bearing_to_looseness_principal": True}
-            for scope in ("train_internal_cv", "test_window", "test_record")
-        ]
-    )
-    effects = pd.DataFrame({"magnitude": ["negligible", "small", "medium"]})
+    evidence = _confusion_evidence()
+    effects = _complete_effects()
     assert recommend_new_features(evidence, effects)["recommend_new_features"] is True
-    evidence.loc[0, "bearing_to_looseness_principal"] = False
+    evidence.loc[0, "looseness_to_bearing_count"] = 0
     result = recommend_new_features(evidence, effects)
     assert result["recommend_new_features"] is False
-    assert "train_internal_cv" in result["failed_conditions"]
+    assert result["failed_conditions"]
+
+
+def test_new_features_reject_small_sample_or_nonmajority_weak_effects():
+    effects = _complete_effects()
+    effects.loc[0, "small_sample"] = True
+    assert recommend_new_features(_confusion_evidence(), effects)["recommend_new_features"] is False
+    assert recommend_new_features(_confusion_evidence(), _complete_effects(weak=False))[
+        "recommend_new_features"
+    ] is False
 
 
 def _write_json(path, value):
@@ -135,6 +174,16 @@ def _synthetic_staging(root: Path):
                         "fold_count": [5, 5],
                     }
                 ).to_csv(run / "internal_cv_iteration_summary.csv", index=False)
+                pd.DataFrame([
+                    {
+                        "fold": fold, "iteration": iteration, "record_macro_f1": 0.7,
+                        "looseness_actual_count": 5, "looseness_to_bearing_count": 2,
+                        "looseness_to_bearing_rate": 0.4, "looseness_other_max_offdiag_count": 1,
+                        "bearing_actual_count": 5, "bearing_to_looseness_count": 2,
+                        "bearing_to_looseness_rate": 0.4, "bearing_other_max_offdiag_count": 1,
+                    }
+                    for fold in range(1, 6) for iteration in (20, 40)
+                ]).to_csv(run / "internal_cv_fold_scores.csv", index=False)
                 metadata = {"selected_iteration": 40, "split_mode": split_mode, "channel": channel}
                 _write_json(run / "metadata.json", metadata)
                 report = {
@@ -146,6 +195,10 @@ def _synthetic_staging(root: Path):
                     "macro_f1": 0.80 + offset,
                     "weighted_f1": 0.80 + offset,
                     "classification_report": report,
+                    "confusion_matrix": [
+                        [8 if row == column else (2 if (row, column) in ((3, 4), (4, 3)) else 0)
+                         for column in range(6)] for row in range(6)
+                    ],
                 }
                 _write_json(run / "window_metrics.json", metrics)
                 _write_json(run / "record_metrics.json", metrics)
@@ -154,11 +207,16 @@ def _synthetic_staging(root: Path):
                 [{"target_group": "correct_looseness", "feature": "rms", "window_count": 5,
                   "record_count": 5, "median": 1.0, "q1": 0.9, "q3": 1.1, "iqr": 0.2}]
             )
-            effects = pd.DataFrame(
-                [{"feature": "rms", "group_a": "correct_looseness", "group_b": "looseness_to_bearing",
-                  "n_records_a": 5, "n_records_b": 5, "delta": 0.1, "abs_delta": 0.1,
-                  "magnitude": "negligible", "small_sample": False}]
-            )
+            effects = pd.DataFrame([
+                {"feature": f"f{feature}", "group_a": group_a, "group_b": group_b,
+                 "n_records_a": 5, "n_records_b": 5, "delta": 0.1, "abs_delta": 0.1,
+                 "magnitude": "negligible", "small_sample": False}
+                for group_a, group_b in (
+                    ("correct_looseness", "looseness_to_bearing"),
+                    ("correct_bearing", "bearing_to_looseness"),
+                    ("correct_looseness", "correct_bearing"),
+                ) for feature in range(43)
+            ])
             errors = pd.DataFrame(
                 [{"target_group": "looseness_to_bearing", "record_id": f"r-{channel}-{split_mode}",
                   "motor": "M", "rpm": 1000, "condition": "c", "state": "s", "severity": "low",
@@ -187,6 +245,8 @@ def test_generate_reports_writes_exact_tables_sections_and_readable_plots(tmp_pa
         "comparison/ablation_deltas.csv",
         "comparison/channel_class_recall.csv",
         "comparison/ch5_unique_value.csv",
+        "comparison/class_recall_deltas.csv",
+        "comparison/new_feature_decision.csv",
         "conclusion.md",
     ]
     for relative in exact_files:
@@ -209,3 +269,26 @@ def test_generate_reports_writes_exact_tables_sections_and_readable_plots(tmp_pa
     assert "独立测试窗口级" in conclusion
     assert "独立测试 record 级" in conclusion
     assert "不作因果解释" in conclusion
+    assert "建议开展新特征研究" in conclusion
+    recall_deltas = pd.read_csv(tmp_path / "comparison" / "class_recall_deltas.csv")
+    assert len(recall_deltas) == 3 * 2 * 2 * 6
+    assert set(recall_deltas["class"]) == set(LABEL_ORDER)
+    decision = pd.read_csv(tmp_path / "comparison" / "new_feature_decision.csv")
+    assert decision["recommend_new_features"].eq(True).all()
+
+
+def test_generate_reports_renders_negative_new_feature_decision_from_cv_evidence(tmp_path):
+    diagnostics, consolidated, decisions = _synthetic_staging(tmp_path)
+    score_path = tmp_path / "models" / "record" / "ch3" / "features_40" / "internal_cv_fold_scores.csv"
+    scores = pd.read_csv(score_path)
+    scores.loc[scores["iteration"].eq(40), "looseness_to_bearing_count"] = 0
+    scores.loc[scores["iteration"].eq(40), "looseness_to_bearing_rate"] = 0.0
+    scores.to_csv(score_path, index=False)
+
+    generate_reports(tmp_path, diagnostics, consolidated, decisions)
+
+    decision = pd.read_csv(tmp_path / "comparison" / "new_feature_decision.csv")
+    assert decision.loc[0, "recommend_new_features"] in (False, np.bool_(False))
+    conclusion = (tmp_path / "conclusion.md").read_text(encoding="utf-8")
+    assert "不建议仅据现有证据新增特征" in conclusion
+    assert "CH3/record/train_internal_cv" in conclusion

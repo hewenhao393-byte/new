@@ -163,6 +163,35 @@ def test_staged_record_scores_calls_stream_once_and_preserves_feature_order():
     assert model.seen_columns == ["f2", "f1"]
     assert scores["iteration"].tolist() == [1, 3]
     assert scores.loc[1, "record_macro_f1"] == pytest.approx(1.0)
+    assert {
+        "looseness_to_bearing_count", "looseness_to_bearing_rate",
+        "bearing_to_looseness_count", "bearing_to_looseness_rate",
+        "looseness_other_max_offdiag_count", "bearing_other_max_offdiag_count",
+    }.issubset(scores.columns)
+
+
+def test_staged_record_scores_emits_directional_confusion_from_same_stream():
+    validation = _validation()
+    probabilities = _perfect_probabilities(validation)
+    looseness = LABEL_ORDER.index("松动")
+    bearing = LABEL_ORDER.index("轴承故障")
+    looseness_rows = validation["label"].eq("松动").to_numpy()
+    bearing_rows = validation["label"].eq("轴承故障").to_numpy()
+    probabilities[looseness_rows] = 0
+    probabilities[looseness_rows, bearing] = 1
+    probabilities[bearing_rows] = 0
+    probabilities[bearing_rows, looseness] = 1
+    model = FakeStagedModel([probabilities])
+
+    scores = staged_record_scores(model, validation, ["f1", "f2"], [1], LABEL_ORDER)
+
+    assert model.calls == 1
+    assert scores.loc[0, "looseness_to_bearing_count"] == 1
+    assert scores.loc[0, "bearing_to_looseness_count"] == 1
+    assert scores.loc[0, "looseness_to_bearing_rate"] == pytest.approx(1.0)
+    assert scores.loc[0, "bearing_to_looseness_rate"] == pytest.approx(1.0)
+    assert scores.loc[0, "looseness_other_max_offdiag_count"] == 0
+    assert scores.loc[0, "bearing_other_max_offdiag_count"] == 0
 
 
 def test_staged_record_scores_rejects_incomplete_stream():
@@ -288,7 +317,7 @@ def test_select_iterations_runs_one_real_catboost_model_per_reusable_fold(monkey
     assert len(models) == 5
     assert all(params["iterations"] == 2 for params in models)
     assert result["fold_hash"] == folds[2]
-    assert result["fold_scores"].shape == (10, 3)
+    assert result["fold_scores"].shape == (10, 11)
     assert result["summary"]["fold_count"].tolist() == [5, 5]
     assert result["selected_iteration"] in [1, 2]
 
