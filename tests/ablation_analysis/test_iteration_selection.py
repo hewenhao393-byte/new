@@ -383,3 +383,98 @@ def test_select_iterations_reasserts_record_consistency_before_external_folds(
 
     with pytest.raises(ValueError, match=rf"record.*conflict.*{column}"):
         select_iterations(train, FEATURE_40, folds, checkpoints=[1])
+
+
+def test_staged_record_scores_rejects_metadata_as_feature():
+    validation = _validation()
+
+    with pytest.raises(ValueError, match=r"feature_names.*rpm"):
+        staged_record_scores(
+            FakeStagedModel([np.full((12, 6), 1 / 6)]),
+            validation,
+            ["f1", "rpm"],
+            [1],
+            LABEL_ORDER,
+        )
+
+
+@pytest.mark.parametrize("bad_value", ["not-numeric", np.inf])
+def test_staged_record_scores_rejects_nonnumeric_or_nonfinite_features(bad_value):
+    validation = _validation()
+    if isinstance(bad_value, str):
+        validation["f1"] = validation["f1"].astype(object)
+    validation.loc[0, "f1"] = bad_value
+
+    with pytest.raises(ValueError, match=r"numeric.*finite"):
+        staged_record_scores(
+            FakeStagedModel([np.full((12, 6), 1 / 6)]),
+            validation,
+            ["f1", "f2"],
+            [1],
+            LABEL_ORDER,
+        )
+
+
+def _rehash_manifest(manifest):
+    import ablation_analysis.iteration_selection as module
+
+    manifest = manifest.copy()
+    manifest["fold_sha256"] = module._manifest_hash(manifest)
+    return manifest
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest.assign(extra="forbidden"),
+        lambda manifest: manifest.assign(role=manifest["role"].mask(manifest.index == 0, "test")),
+        lambda manifest: manifest.assign(fold=manifest["fold"] + 1),
+        lambda manifest: pd.concat([manifest, manifest.iloc[[0]]], ignore_index=True),
+        lambda manifest: manifest.drop(manifest.index[0]).reset_index(drop=True),
+    ],
+    ids=["extra-column", "test-role", "noncanonical-folds", "duplicate", "incomplete-partition"],
+)
+def test_select_iterations_rejects_noncanonical_external_manifest(monkeypatch, mutate):
+    train = _six_class_feature_train()
+    manifest, indices, _ = make_record_folds(train["label"], train["record_id"])
+    invalid = mutate(manifest.copy())
+    if invalid.columns.tolist() == manifest.columns.tolist():
+        invalid = _rehash_manifest(invalid)
+    monkeypatch.setattr("ablation_analysis.iteration_selection.MAX_ITERATIONS", 1)
+
+    with pytest.raises(ValueError, match="manifest"):
+        select_iterations(train, FEATURE_40, invalid, indices, checkpoints=[1])
+
+
+def test_select_iterations_rejects_stale_manifest_hash(monkeypatch):
+    train = _six_class_feature_train()
+    manifest, indices, _ = make_record_folds(train["label"], train["record_id"])
+    original = manifest.loc[0, "record_id"]
+    manifest.loc[manifest["record_id"].eq(original), "record_id"] = "changed"
+    monkeypatch.setattr("ablation_analysis.iteration_selection.MAX_ITERATIONS", 1)
+
+    with pytest.raises(ValueError, match="hash"):
+        select_iterations(train, FEATURE_40, manifest, indices, checkpoints=[1])
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        lambda values, size: values.astype(float),
+        lambda values, size: values.astype(bool),
+        lambda values, size: np.append(values[1:], -1),
+        lambda values, size: np.append(values[1:], size),
+        lambda values, size: np.append(values[1:], values[1]),
+    ],
+    ids=["float", "boolean", "negative", "out-of-range", "duplicate"],
+)
+def test_select_iterations_rejects_invalid_index_arrays(monkeypatch, replacement):
+    train = _six_class_feature_train()
+    manifest, indices, fold_hash = make_record_folds(train["label"], train["record_id"])
+    tampered = [(fit.copy(), validation.copy()) for fit, validation in indices]
+    fit, validation = tampered[0]
+    tampered[0] = (replacement(fit, len(train)), validation)
+    monkeypatch.setattr("ablation_analysis.iteration_selection.MAX_ITERATIONS", 1)
+
+    with pytest.raises(ValueError, match="indices"):
+        select_iterations(train, FEATURE_40, (manifest, tampered, fold_hash), checkpoints=[1])

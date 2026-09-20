@@ -18,6 +18,22 @@ from .config import CV_SPLITS, ITERATION_GRID, LABEL_ORDER, MAX_ITERATIONS, MODE
 
 _FUSION_META = ["record_id", "label", "motor", "rpm", "condition", "state", "severity"]
 _RECORD_CONTRACT = ["label", "motor", "rpm", "condition", "state", "severity"]
+_MANIFEST_COLUMNS = ["fold", "role", "record_id", "fold_sha256"]
+_FORBIDDEN_FEATURES = set(
+    _FUSION_META
+    + [
+        "window_id",
+        "start_sample",
+        "end_sample",
+        "split",
+        "channel",
+        "train_block_id",
+        "predicted_label",
+        "target",
+        "true_label",
+        *LABEL_ORDER,
+    ]
+)
 
 
 def _one_dimensional(values, name: str) -> pd.Series:
@@ -120,17 +136,36 @@ def _validate_record_contract(frame: pd.DataFrame, name: str) -> None:
         )
 
 
+def _validate_features(frame: pd.DataFrame, feature_names, name: str) -> list[str]:
+    feature_names = list(feature_names)
+    if not feature_names or any(not isinstance(feature, str) for feature in feature_names):
+        raise ValueError("feature_names must be non-empty strings")
+    if len(feature_names) != len(set(feature_names)):
+        raise ValueError("feature_names must be unique")
+    overlap = sorted(set(feature_names) & _FORBIDDEN_FEATURES)
+    if overlap:
+        raise ValueError(f"feature_names overlap metadata or target columns: {overlap}")
+    missing = [feature for feature in feature_names if feature not in frame.columns]
+    if missing:
+        raise ValueError(f"{name} missing feature columns: {missing}")
+    try:
+        values = frame.loc[:, feature_names].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} feature columns must be numeric and finite") from exc
+    if not np.isfinite(values).all():
+        raise ValueError(f"{name} feature columns must be numeric and finite")
+    return feature_names
+
+
 def staged_record_scores(model, validation, feature_names, checkpoints, classes):
     """Score selected one-based stages from one CatBoost staged prediction stream."""
-    feature_names = list(feature_names)
+    feature_names = _validate_features(validation, feature_names, "validation")
     checkpoints = _validate_checkpoints(checkpoints)
     classes = _validate_classes(model, classes)
     required = list(dict.fromkeys(_FUSION_META + feature_names))
     missing = [column for column in required if column not in validation.columns]
     if missing:
         raise ValueError(f"validation missing required columns: {missing}")
-    if not feature_names or len(feature_names) != len(set(feature_names)):
-        raise ValueError("feature_names must be non-empty and unique")
     unknown = sorted(set(validation["label"].dropna()) - set(LABEL_ORDER))
     if unknown:
         raise ValueError(f"validation contains unknown label values: {unknown}")
@@ -218,28 +253,75 @@ def choose_iteration(summary, checkpoints=ITERATION_GRID, expected_folds=CV_SPLI
     return int(tied["iteration"].min())
 
 
+def _validate_manifest(manifest: pd.DataFrame) -> str:
+    if not isinstance(manifest, pd.DataFrame):
+        raise ValueError("fold manifest must be a DataFrame")
+    if manifest.columns.tolist() != _MANIFEST_COLUMNS:
+        raise ValueError(f"fold manifest columns must be exactly {_MANIFEST_COLUMNS}")
+    if manifest.empty:
+        raise ValueError("fold manifest must not be empty")
+    if manifest[["fold", "role", "record_id", "fold_sha256"]].isna().any().any():
+        raise ValueError("fold manifest must not contain null values")
+    if not pd.api.types.is_integer_dtype(manifest["fold"].dtype) or pd.api.types.is_bool_dtype(
+        manifest["fold"].dtype
+    ):
+        raise ValueError("fold manifest fold values must be integers")
+    folds = sorted(manifest["fold"].unique().tolist())
+    if folds != list(range(1, len(folds) + 1)):
+        raise ValueError("fold manifest folds must be canonical contiguous values starting at 1")
+    if not set(manifest["role"]).issubset({"fit", "validation"}):
+        raise ValueError("fold manifest roles must be fit or validation only")
+    if manifest.duplicated(["fold", "role", "record_id"]).any():
+        raise ValueError("fold manifest contains duplicate rows")
+
+    eligible_records = set(manifest["record_id"])
+    for fold in folds:
+        current = manifest[manifest["fold"].eq(fold)]
+        if set(current["record_id"]) != eligible_records or current["record_id"].duplicated().any():
+            raise ValueError("fold manifest must partition every eligible record exactly once per fold")
+        if set(current["role"]) != {"fit", "validation"}:
+            raise ValueError("fold manifest must contain fit and validation roles in every fold")
+    validation_counts = manifest[manifest["role"].eq("validation")].groupby("record_id").size()
+    if set(validation_counts.index) != eligible_records or not validation_counts.eq(1).all():
+        raise ValueError("fold manifest must validate every eligible record exactly once")
+
+    computed_hash = _manifest_hash(manifest)
+    stored_hashes = manifest["fold_sha256"].drop_duplicates().tolist()
+    if stored_hashes != [computed_hash]:
+        raise ValueError("fold manifest stored hash does not match its canonical contents")
+    return computed_hash
+
+
 def _normalize_folds(folds, supplied_indices=None):
     if supplied_indices is None:
         if not isinstance(folds, tuple) or len(folds) != 3:
             raise ValueError("folds must be a manifest plus indices or the result from make_record_folds")
         manifest, indices, fold_hash = folds
+        computed_hash = _validate_manifest(manifest)
+        if fold_hash != computed_hash:
+            raise ValueError("fold manifest hash argument does not match its canonical contents")
     else:
         manifest, indices = folds, supplied_indices
-        if not isinstance(manifest, pd.DataFrame):
-            raise ValueError("fold manifest must be a DataFrame")
-        fold_hash = _manifest_hash(manifest)
-        if "fold_sha256" in manifest:
-            stored_hashes = manifest["fold_sha256"].drop_duplicates().tolist()
-            if stored_hashes != [fold_hash]:
-                raise ValueError("fold manifest does not match its stored fold hash")
-    if not isinstance(manifest, pd.DataFrame) or _manifest_hash(manifest) != fold_hash:
-        raise ValueError("fold manifest does not match fold hash")
+        fold_hash = _validate_manifest(manifest)
     return manifest, indices, fold_hash
+
+
+def _validate_index_array(values, row_count: int, name: str) -> np.ndarray:
+    array = np.asarray(values)
+    if array.ndim != 1 or array.size == 0:
+        raise ValueError(f"fold indices {name} must be a non-empty one-dimensional array")
+    if not np.issubdtype(array.dtype, np.integer) or np.issubdtype(array.dtype, np.bool_):
+        raise ValueError(f"fold indices {name} must have an integer dtype")
+    if (array < 0).any() or (array >= row_count).any():
+        raise ValueError(f"fold indices {name} contain negative or out-of-range values")
+    if len(np.unique(array)) != len(array):
+        raise ValueError(f"fold indices {name} contain duplicates")
+    return array.astype(np.int64, copy=False)
 
 
 def select_iterations(train, feature_names, folds, fold_indices=None, checkpoints=ITERATION_GRID):
     """Fit one max-iteration model per supplied training fold and select a stage."""
-    feature_names = list(feature_names)
+    feature_names = _validate_features(train, feature_names, "train")
     checkpoints = _validate_checkpoints(checkpoints)
     if checkpoints[-1] > MAX_ITERATIONS:
         raise ValueError("checkpoint grid exceeds MAX_ITERATIONS")
@@ -261,8 +343,8 @@ def select_iterations(train, feature_names, folds, fold_indices=None, checkpoint
     if len(fold_indices) != manifest["fold"].nunique():
         raise ValueError("fold indices do not match the fold manifest")
     for fold, (fit_idx, validation_idx) in enumerate(fold_indices, start=1):
-        fit_idx = np.asarray(fit_idx, dtype=np.int64)
-        validation_idx = np.asarray(validation_idx, dtype=np.int64)
+        fit_idx = _validate_index_array(fit_idx, len(train), f"fold {fold} fit")
+        validation_idx = _validate_index_array(validation_idx, len(train), f"fold {fold} validation")
         fit_rows = set(fit_idx.tolist())
         validation_rows = set(validation_idx.tolist())
         if (
@@ -288,8 +370,8 @@ def select_iterations(train, feature_names, folds, fold_indices=None, checkpoint
     rows = []
     params = {**MODEL_PARAMS, "iterations": MAX_ITERATIONS}
     for fold, (fit_idx, validation_idx) in enumerate(fold_indices, start=1):
-        fit_idx = np.asarray(fit_idx, dtype=np.int64)
-        validation_idx = np.asarray(validation_idx, dtype=np.int64)
+        fit_idx = _validate_index_array(fit_idx, len(train), f"fold {fold} fit")
+        validation_idx = _validate_index_array(validation_idx, len(train), f"fold {fold} validation")
         if set(train.iloc[fit_idx]["record_id"]) & set(train.iloc[validation_idx]["record_id"]):
             raise ValueError("record overlap in supplied fold indices")
         model = CatBoostClassifier(**params)
