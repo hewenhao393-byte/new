@@ -7,7 +7,7 @@ from .acceptance import accept_feature_tables, write_acceptance
 from .config import FEATURE_COLUMNS, LABEL_ORDER
 from .correlation import analyze_correlations
 from .modeling import train_baseline
-from .quality import describe_features, pairwise_effects, record_variability
+from .quality import class_separation, describe_features, pairwise_effects, record_variability
 from .report import save_confusion, write_conclusion
 
 
@@ -24,6 +24,7 @@ def _write_quality(tables, root):
             pairwise_effects(train,FEATURE_COLUMNS,"label","正常","联轴器不对中").to_csv(out/f"{mode}_ch{channel}_train_normal_vs_misalignment.csv",index=False,encoding="utf-8-sig")
             pairwise_effects(train,FEATURE_COLUMNS,"label","松动","轴承故障").to_csv(out/f"{mode}_ch{channel}_train_looseness_vs_bearing.csv",index=False,encoding="utf-8-sig")
             record_variability(train,FEATURE_COLUMNS).to_csv(out/f"{mode}_ch{channel}_train_record_variability.csv",index=False,encoding="utf-8-sig")
+            class_separation(train,FEATURE_COLUMNS).to_csv(out/f"{mode}_ch{channel}_train_class_separation.csv",index=False,encoding="utf-8-sig")
 
 
 def _write_correlations(tables,root):

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from baseline_analysis.config import FEATURE_COLUMNS, FEATURE_NAMES, FIXED_PARAMS, LABEL_ORDER
-from baseline_analysis.quality import describe_features, pairwise_effects, record_variability
+from baseline_analysis.quality import class_separation, describe_features, pairwise_effects, record_variability
 from baseline_analysis.correlation import analyze_correlations
 from baseline_analysis.evaluation import evaluate_predictions, fuse_records
 from baseline_analysis.acceptance import write_acceptance
@@ -24,6 +24,8 @@ def test_quality_statistics_and_record_first_variability():
     assert e.loc[0,"mean_difference"]==-4
     v=record_variability(d,["f"])
     assert v.loc[0,"record_count"]==2
+    c=class_separation(d,["f"])
+    assert c.loc[0,"eta_squared"]>0
 
 def test_pearson_controls_pairs_and_protected_features_are_manual_review():
     x=np.arange(20,dtype=float)

@@ -34,6 +34,11 @@ def train_baseline(data,mode,channel,output_dir,run_cv=True):
     importance=pd.DataFrame({"feature":FEATURE_COLUMNS,"importance":model.get_feature_importance()}).sort_values("importance",ascending=False); importance["rank"]=np.arange(1,len(importance)+1); importance.to_csv(out/"feature_importance.csv",index=False,encoding="utf-8-sig"); importance.head(20).to_csv(out/"feature_importance_top20.csv",index=False,encoding="utf-8-sig")
     errors=records[records.label.ne(records.predicted_label)].copy(); errors.to_csv(out/"misclassified_records.csv",index=False,encoding="utf-8-sig")
     targeted=errors[((errors.label.eq("正常"))&(errors.predicted_label.eq("联轴器不对中")))|((errors.label.eq("松动"))&(errors.predicted_label.eq("轴承故障")))]; targeted.to_csv(out/"targeted_misclassified_records.csv",index=False,encoding="utf-8-sig")
+    record_dimensions=[]
+    for col in ["motor","rpm","condition","state","severity"]:
+        e=errors.groupby(col,dropna=False).size().rename("misclassified_records"); n=records.groupby(col,dropna=False).size().rename("total_records")
+        x=pd.concat([e,n],axis=1).fillna(0).reset_index(); x.insert(0,"dimension",col); x=x.rename(columns={col:"value"}); x["misclassification_rate"]=x.misclassified_records/x.total_records; record_dimensions.append(x)
+    pd.concat(record_dimensions,ignore_index=True).to_csv(out/"record_error_source_summary.csv",index=False,encoding="utf-8-sig")
     window_errors=pred[pred.label.ne(pred.predicted_label)].copy()
     totals=pred.groupby("record_id").size().rename("total_window_count")
     by_record=(window_errors.groupby(["record_id","label","predicted_label","motor","rpm","condition","state","severity"],dropna=False).size().rename("misclassified_window_count").reset_index().merge(totals,on="record_id"))
