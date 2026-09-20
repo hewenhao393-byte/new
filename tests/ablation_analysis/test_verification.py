@@ -109,6 +109,8 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
     ("missing_report", "report"),
     ("missing_diagnostic", "report"),
     ("changed_diagnostic", "diagnostic"),
+    ("coherent_label", "authoritative label"),
+    ("replacement_png", "pixel mismatch"),
 ])
 def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, match):
     output = _build_fixture(tmp_path, monkeypatch)
@@ -150,11 +152,20 @@ def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, mat
         frame.loc[0, "正常"] += .2; frame.to_csv(path, index=False)
     elif mutation == "missing_report":
         path = output / "conclusion.md"; path.rename(output / "conclusion.md.hidden")
-    else:
+    elif mutation in {"missing_diagnostic", "changed_diagnostic"}:
         path = output / "diagnostics" / "error_concentration.csv"
         if mutation == "missing_diagnostic":
             path.rename(path.with_suffix(".csv.hidden"))
         else:
             frame = pd.read_csv(path); frame.loc[0, "top5_share"] += .1; frame.to_csv(path, index=False)
+    elif mutation == "coherent_label":
+        path = run / "window_predictions.csv"; frame = pd.read_csv(path); frame.loc[0, "label"] = "汽蚀"; frame.to_csv(path, index=False)
+        path = run / "record_predictions.csv"; frame = pd.read_csv(path); frame.loc[0, "label"] = "汽蚀"; frame.to_csv(path, index=False)
+    else:
+        from PIL import Image as PILImage
+        path = output / "figures" / "iteration_curves" / "ch3_record_features_40.png"
+        with PILImage.open(path) as image:
+            replacement = PILImage.new("RGB", image.size, "white")
+        replacement.save(path)
     with pytest.raises(ValueError, match=match):
-        verify_output(output)
+        verify_output(output, deep=False)

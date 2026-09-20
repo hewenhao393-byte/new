@@ -4,26 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
 import pandas as pd
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, Pool
 from PIL import Image
 
 from baseline_analysis.evaluation import evaluate_predictions, fuse_records
 from baseline_analysis.acceptance import accept_feature_tables
+from baseline_analysis.config import MODEL_PARAMS
 
 from .config import FEATURE_40, FEATURE_43, JOIN_KEYS, LABEL_ORDER
 from .input_validation import validate_and_merge_inputs
-from .iteration_selection import _validate_manifest, aggregate_cv_scores, choose_iteration
+from .iteration_selection import _validate_manifest, aggregate_cv_scores, choose_iteration, staged_record_scores
 from .confusion_diagnostics import assign_target_group, effect_size_table, grouped_feature_summary, targeted_error_concentration
 from .redundancy import consolidate_pairs, redundancy_decisions
 from .reporting import (
     REPORT_REQUIRED_FILES, _DELTA_REQUIRED, _aggregate_diagnostics, _build_class_recall_deltas,
     _build_deltas, _load_model_artifacts, assess_ch5_unique_value, recommend_feature_set,
-    recommend_new_features,
+    recommend_new_features, _plot_iteration_curves, _plot_class_recalls, _resolve_chinese_font,
 )
 
 
@@ -108,7 +111,7 @@ def _assert_frame_close(actual: pd.DataFrame, expected: pd.DataFrame, keys, name
             raise ValueError(f"comparison mismatch in {name}.{column}")
 
 
-def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
+def verify_output(output_root, *, deep: bool = True, _accepted=None) -> pd.DataFrame:
     """Verify every persisted result against inputs and independently write an audit report."""
     root = Path(output_root)
     checks = []
@@ -131,6 +134,20 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
     if not grid or grid != sorted(set(grid)) or any(value < 1 for value in grid):
         raise ValueError("iteration grid is not canonical")
     passed("manifest", "iteration_grid", json.dumps(grid))
+
+    expected_inputs = {
+        *(str((source / folder / f"features_ch{channel}.csv").resolve())
+          for folder in ("file_split", "temporal_split") for channel in (3, 4, 5)),
+        *(str((baseline / "models" / mode / f"ch{channel}" / "window_predictions.csv").resolve())
+          for mode in ("record", "temporal") for channel in (3, 4, 5)),
+        str((baseline / "correlations" / "pearson_high_correlation_pairs.csv").resolve()),
+    }
+    temporal_input = source / "temporal_split" / "temporal_split.csv"
+    if temporal_input.is_file(): expected_inputs.add(str(temporal_input.resolve()))
+    if set(manifest["input_sha256"]) != expected_inputs:
+        raise ValueError("input hash path set is not canonical")
+    if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in manifest["input_sha256"].values()):
+        raise ValueError("input hash schema is invalid")
 
     for path_string, expected_hash in manifest["input_sha256"].items():
         path = Path(path_string)
@@ -217,6 +234,7 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
             passed("diagnostic_join", f"{mode}_ch{channel}", "unmatched=0")
 
     metric_rows, recall_rows = [], []
+    deep_completed = 0
     for mode, channel, feature_set in sorted(expected_runs):
         run = root / "models" / mode / f"ch{channel}" / feature_set
         missing = MODEL_FILES - {path.name for path in run.iterdir()}
@@ -240,10 +258,38 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
         chosen = choose_iteration(summary, checkpoints=grid, expected_folds=int(manifest["cv_splits"]))
         if selected != chosen:
             raise ValueError(f"chosen iteration mismatch for {run}: metadata={selected}, recomputed={chosen}")
+        if deep:
+            train = source_tables[(mode, channel)][source_tables[(mode, channel)].split.eq(metadata["training_split"])].reset_index(drop=True)
+            bundle = np.load(root / "fold_manifests" / f"{mode}_ch{channel}_indices.npz")
+            reproduced_folds = []
+            for fold_number in range(1, int(manifest["cv_splits"]) + 1):
+                fit = bundle[f"fold_{fold_number}_fit"]
+                validation = bundle[f"fold_{fold_number}_validation"]
+                cv_model = CatBoostClassifier(**{**MODEL_PARAMS, "iterations": int(manifest["max_iterations"])})
+                cv_model.fit(Pool(train.iloc[fit][features], train.iloc[fit]["label"]))
+                staged = staged_record_scores(cv_model, train.iloc[validation], features, grid, list(cv_model.classes_))
+                staged.insert(0, "fold", fold_number); reproduced_folds.append(staged)
+            reproduced_scores = pd.concat(reproduced_folds, ignore_index=True)
+            _assert_frame_close(scores, reproduced_scores, ["fold", "iteration"], f"deep CV fold scores {run}")
+            _assert_frame_close(summary, aggregate_cv_scores(reproduced_scores), ["iteration"], f"deep CV summary {run}")
+            passed("deep_cv", f"{mode}_ch{channel}_{feature_set}",
+                   f"folds={manifest['cv_splits']}; checkpoints={len(grid)}")
+            deep_completed += 1
+            if deep_completed % 2 == 0:
+                print(f"deep verification progress: completed {deep_completed}/12 runs", flush=True)
 
         data = source_tables[(mode, channel)]
         test = data[data.split.eq("test")].reset_index(drop=True)
         saved = pd.read_csv(run / "window_predictions.csv", low_memory=False)
+        authoritative = saved[JOIN_KEYS].merge(test, on=JOIN_KEYS, how="left", validate="one_to_one", indicator=True)
+        if not authoritative["_merge"].eq("both").all() or len(authoritative) != len(test):
+            raise ValueError(f"authoritative test join mismatch for {run}")
+        for column in ("label", "motor", "rpm", "condition", "state", "severity", "channel", "split"):
+            if column in saved.columns and column in authoritative.columns:
+                left, right = saved[column], authoritative[column]
+                equal = left.eq(right) | (left.isna() & right.isna())
+                if not equal.all():
+                    raise ValueError(f"authoritative {column} mismatch for {run}")
         probabilities = saved[LABEL_ORDER].to_numpy(float)
         if (not np.isfinite(probabilities).all() or (probabilities < 0).any() or (probabilities > 1).any()
                 or not np.allclose(probabilities.sum(axis=1), 1, atol=1e-12, rtol=0)):
@@ -258,15 +304,27 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
         ordered = saved[JOIN_KEYS].merge(test, on=JOIN_KEYS, how="left", validate="one_to_one")
         model = CatBoostClassifier()
         model.load_model(str(run / "model.cbm"))
+        if int(model.tree_count_) != selected:
+            raise ValueError(f"model tree count mismatch for {run}: {model.tree_count_} != {selected}")
+        if list(model.feature_names_) != features:
+            raise ValueError(f"model feature order mismatch for {run}")
         reproduced = np.asarray(model.predict_proba(ordered[features]), float)
         model_classes = list(model.classes_)
         reproduced = reproduced[:, [model_classes.index(label) for label in LABEL_ORDER]]
         if not np.allclose(reproduced, probabilities, atol=1e-12, rtol=0):
             raise ValueError(f"model reload probability mismatch for {run}")
+        importance = pd.read_csv(run / "feature_importance.csv")
+        expected_importance = pd.DataFrame({"feature": features, "importance": model.get_feature_importance()})
+        expected_importance = expected_importance.sort_values("importance", ascending=False, kind="stable").reset_index(drop=True)
+        expected_importance["rank"] = np.arange(1, len(expected_importance) + 1)
+        _assert_frame_close(importance, expected_importance, ["rank"], f"feature importance {run}")
         passed("model", f"{mode}_ch{channel}_{feature_set}", f"iteration={selected}; atol=1e-12")
 
         records = pd.read_csv(run / "record_predictions.csv", low_memory=False)
-        recomputed_records = fuse_records(saved, LABEL_ORDER)
+        authoritative_saved = saved.copy()
+        for column in ("label", "motor", "rpm", "condition", "state", "severity"):
+            authoritative_saved[column] = authoritative[column]
+        recomputed_records = fuse_records(authoritative_saved, LABEL_ORDER)
         _assert_frame_close(records, recomputed_records, ["record_id"], f"record predictions {run}")
         if not records.valid_window_count.eq(records.window_count).all():
             raise ValueError(f"valid_window_count mismatch for {run}")
@@ -277,7 +335,7 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
             raise ValueError(f"mean max confidence metadata mismatch for {run}")
         if not np.isclose(confidence["record_mean_max_class_probability"], records.mean_max_class_probability.mean(), atol=1e-12, rtol=0):
             raise ValueError(f"record mean max confidence metadata mismatch for {run}")
-        window_metrics = evaluate_predictions(saved.label, saved.predicted_label, LABEL_ORDER)
+        window_metrics = evaluate_predictions(authoritative.label, saved.predicted_label, LABEL_ORDER)
         record_metrics = evaluate_predictions(records.label, records.predicted_label, LABEL_ORDER)
         _same_json_numbers(_json(run / "window_metrics.json"), window_metrics, f"window metric {run}")
         _same_json_numbers(_json(run / "record_metrics.json"), record_metrics, f"record metric {run}")
@@ -396,12 +454,27 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
         except Exception as exc:
             raise ValueError(f"report figure is unreadable: {path}: {exc}") from exc
         passed("figure", str(path.relative_to(root)), f"bytes={path.stat().st_size}")
+    font, expected_font_metadata = _resolve_chinese_font()
+    stored_font_metadata = _json(root / "figures" / "font_metadata.json")
+    if stored_font_metadata != expected_font_metadata or not Path(stored_font_metadata["resolved_path"]).is_file():
+        raise ValueError("font metadata or CJK glyph coverage mismatch")
+    render_root = Path(tempfile.mkdtemp(prefix="ch43_ablation_verify_render_", dir="/private/tmp"))
+    _plot_iteration_curves(report_curves, metrics[["channel", "split_mode", "feature_set", "selected_iteration"]],
+                           render_root / "iteration_curves", font)
+    _plot_class_recalls(recalls, render_root / "class_recall", font)
+    for saved_path in [*iteration_pngs, *recall_pngs]:
+        rendered = render_root / saved_path.parent.name / saved_path.name
+        with Image.open(saved_path) as saved_image, Image.open(rendered) as rendered_image:
+            if saved_image.size != rendered_image.size or not np.array_equal(np.asarray(saved_image), np.asarray(rendered_image)):
+                raise ValueError(f"persisted figure pixel mismatch: {saved_path}")
+    passed("figure_fidelity", "deterministic_rerender", str(render_root))
 
     report = pd.DataFrame(checks, columns=["category", "item", "passed", "detail"])
+    if report.duplicated(["category", "item"]).any():
+        raise ValueError("verification check IDs are not unique")
     report_path = root / "verification_report.csv"
     report_temp = root / f".verification_report-{uuid4().hex}.csv"
     report.to_csv(report_temp, index=False, encoding="utf-8-sig")
-    report_temp.replace(report_path)
     summary = (
         "# 独立验证摘要\n\n"
         f"- 结论：**PASS**\n- 通过检查：{len(report)}\n- 模型运行：12\n"
@@ -411,5 +484,6 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
     summary_path = root / "verification_summary.md"
     summary_temp = root / f".verification_summary-{uuid4().hex}.md"
     summary_temp.write_text(summary, encoding="utf-8")
+    report_temp.replace(report_path)
     summary_temp.replace(summary_path)
     return report

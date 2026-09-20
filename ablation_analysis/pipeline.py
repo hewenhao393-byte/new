@@ -302,7 +302,7 @@ def run_pipeline(
             redundancy_decisions(FEATURE_43),
         )
         _validate_staging(staging)
-        verify_output(staging, _accepted=(acceptance, tables))
+        verify_output(staging, deep=False, _accepted=(acceptance, tables))
         final_hashes = _hash_inputs(input_paths)
         if final_hashes != preflight_hashes:
             changed = sorted(path for path in preflight_hashes if preflight_hashes[path] != final_hashes.get(path))
