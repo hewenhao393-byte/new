@@ -25,6 +25,7 @@ from .iteration_selection import make_record_folds, select_iterations
 from .modeling import train_selected_model
 from .redundancy import consolidate_pairs, redundancy_decisions
 from .reporting import REPORT_REQUIRED_FILES, generate_reports
+from .verification import verify_output
 
 
 _JOIN_KEYS = ["record_id", "window_id", "start_sample", "end_sample"]
@@ -278,6 +279,8 @@ def run_pipeline(
                             "record_macro_f1": result["record"]["macro_f1"],
                         }
                     )
+                    if len(run_rows) % 2 == 0:
+                        print(f"ablation progress: completed {len(run_rows)}/12 models", flush=True)
 
         results = pd.DataFrame(run_rows)
         results.to_csv(staging / "ablation_results.csv", index=False, encoding="utf-8-sig")
@@ -299,6 +302,7 @@ def run_pipeline(
             redundancy_decisions(FEATURE_43),
         )
         _validate_staging(staging)
+        verify_output(staging)
         final_hashes = _hash_inputs(input_paths)
         if final_hashes != preflight_hashes:
             changed = sorted(path for path in preflight_hashes if preflight_hashes[path] != final_hashes.get(path))
