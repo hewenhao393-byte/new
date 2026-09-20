@@ -82,15 +82,43 @@ def test_duplicate_join_keys_are_rejected_on_each_side(side):
         validate_and_merge_inputs(features, predictions)
 
 
-@pytest.mark.parametrize("side", ["features", "predictions"])
-def test_unmatched_rows_are_rejected_on_each_side(side):
+def test_prediction_without_matching_feature_is_rejected():
     features, predictions = _inputs()
-    if side == "features":
-        features.loc[0, "record_id"] = "feature-only"
-    else:
-        predictions.loc[0, "record_id"] = "prediction-only"
+    predictions.loc[0, "record_id"] = "prediction-only"
 
     with pytest.raises(ValueError, match="unmatched rows"):
+        validate_and_merge_inputs(features, predictions)
+
+
+def test_feature_rows_without_predictions_are_allowed():
+    features, predictions = _inputs()
+    extra = features.iloc[[0]].copy()
+    extra["record_id"] = "train-only"
+    extra["split"] = "train"
+    features = pd.concat([features, extra], ignore_index=True)
+
+    merged = validate_and_merge_inputs(features, predictions)
+
+    assert len(merged) == len(predictions)
+    assert merged["record_id"].tolist() == predictions["record_id"].tolist()
+
+
+@pytest.mark.parametrize("side", ["features", "predictions"])
+@pytest.mark.parametrize("key", JOIN_KEYS)
+def test_null_join_keys_are_rejected_on_each_side(side, key):
+    features, predictions = _inputs()
+    target = features if side == "features" else predictions
+    target.loc[0, key] = np.nan
+
+    with pytest.raises(ValueError, match=rf"null join keys.*{side}"):
+        validate_and_merge_inputs(features, predictions)
+
+
+def test_feature_columns_in_predictions_are_rejected():
+    features, predictions = _inputs()
+    predictions[FEATURE_43[0]] = 123.0
+
+    with pytest.raises(ValueError, match="feature columns.*predictions"):
         validate_and_merge_inputs(features, predictions)
 
 
