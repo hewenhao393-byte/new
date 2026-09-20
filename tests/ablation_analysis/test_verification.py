@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from ablation_analysis.config import FEATURE_43
+from ablation_analysis.iteration_selection import _manifest_hash
 from ablation_analysis.pipeline import run_pipeline
 from ablation_analysis.verification import _validate_temporal_rows, verify_output
 
@@ -100,6 +101,7 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
     ("non_grid_iteration", "iteration"),
     ("wrong_valid_iteration", "chosen iteration"),
     ("fold_overlap", "fold"),
+    ("test_intrusion", "fold"),
     ("fold_hash", "fold"),
     ("invalid_probability", "probability"),
     ("invalid_record_probability", "record predictions"),
@@ -125,6 +127,13 @@ def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, mat
     elif mutation == "fold_overlap":
         path = output / "fold_manifests" / "record_ch3.csv"; frame = pd.read_csv(path)
         frame.loc[(frame.fold == 1) & (frame.role == "validation"), "role"] = "fit"
+        frame["fold_sha256"] = _manifest_hash(frame)
+        frame.to_csv(path, index=False)
+    elif mutation == "test_intrusion":
+        path = output / "fold_manifests" / "record_ch3.csv"; frame = pd.read_csv(path)
+        source = Path(json.loads((output / "run_manifest.json").read_text())["feature_source_root"])
+        test_record = pd.read_csv(source / "file_split" / "features_ch3.csv").query("split == 'test'").record_id.iloc[0]
+        frame.loc[0, "record_id"] = test_record; frame["fold_sha256"] = _manifest_hash(frame)
         frame.to_csv(path, index=False)
     elif mutation == "fold_hash":
         path = output / "fold_manifests" / "record_ch3.csv"; frame = pd.read_csv(path)
