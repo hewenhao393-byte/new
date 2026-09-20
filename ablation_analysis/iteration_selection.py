@@ -17,6 +17,7 @@ from .config import CV_SPLITS, ITERATION_GRID, LABEL_ORDER, MAX_ITERATIONS, MODE
 
 
 _FUSION_META = ["record_id", "label", "motor", "rpm", "condition", "state", "severity"]
+_RECORD_CONTRACT = ["label", "motor", "rpm", "condition", "state", "severity"]
 
 
 def _one_dimensional(values, name: str) -> pd.Series:
@@ -99,6 +100,26 @@ def _validate_classes(model, classes: Sequence[str]) -> list[str]:
     return classes
 
 
+def _validate_record_contract(frame: pd.DataFrame, name: str) -> None:
+    """Require one label/metadata tuple per record, treating null as a value."""
+    conflicts = []
+    for record_id, group in frame.groupby("record_id", sort=False, dropna=False):
+        conflicting_columns = []
+        for column in _RECORD_CONTRACT:
+            first = group[column].iloc[0]
+            matches = group[column].isna() if pd.isna(first) else group[column].eq(first)
+            if not matches.all():
+                conflicting_columns.append(column)
+        if conflicting_columns:
+            conflicts.append((record_id, conflicting_columns))
+    if conflicts:
+        record_id, columns = conflicts[0]
+        raise ValueError(
+            f"{name} record consistency conflict for record_id={record_id!r}; "
+            f"conflicting columns: {', '.join(columns)}"
+        )
+
+
 def staged_record_scores(model, validation, feature_names, checkpoints, classes):
     """Score selected one-based stages from one CatBoost staged prediction stream."""
     feature_names = list(feature_names)
@@ -110,11 +131,13 @@ def staged_record_scores(model, validation, feature_names, checkpoints, classes)
         raise ValueError(f"validation missing required columns: {missing}")
     if not feature_names or len(feature_names) != len(set(feature_names)):
         raise ValueError("feature_names must be non-empty and unique")
-    if validation[required].isna().any().any():
-        raise ValueError("validation required columns must not contain null values")
-    unknown = sorted(set(validation["label"]) - set(LABEL_ORDER))
+    unknown = sorted(set(validation["label"].dropna()) - set(LABEL_ORDER))
     if unknown:
         raise ValueError(f"validation contains unknown label values: {unknown}")
+    _validate_record_contract(validation, "validation")
+    nonnull = ["record_id", "label", *feature_names]
+    if validation[nonnull].isna().any().any():
+        raise ValueError("validation record_id, label, and features must not contain null values")
 
     wanted = set(checkpoints)
     rows = []
@@ -225,6 +248,13 @@ def select_iterations(train, feature_names, folds, fold_indices=None, checkpoint
     missing = [column for column in required if column not in train.columns]
     if missing:
         raise ValueError(f"train missing required columns: {missing}")
+    unknown = sorted(set(train["label"].dropna()) - set(LABEL_ORDER))
+    if unknown:
+        raise ValueError(f"train contains unknown label values: {unknown}")
+    _validate_record_contract(train, "train")
+    nonnull = ["record_id", "label", *feature_names]
+    if train[nonnull].isna().any().any():
+        raise ValueError("train record_id, label, and features must not contain null values")
 
     all_rows = set(range(len(train)))
     validation_counts = np.zeros(len(train), dtype=np.int64)

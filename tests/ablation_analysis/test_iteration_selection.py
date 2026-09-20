@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ablation_analysis.config import ITERATION_GRID, LABEL_ORDER
+from ablation_analysis.config import FEATURE_40, FEATURE_43, ITERATION_GRID, LABEL_ORDER
 from ablation_analysis.iteration_selection import (
     aggregate_cv_scores,
     choose_iteration,
@@ -220,6 +220,34 @@ def test_staged_record_scores_rejects_unknown_truth_and_missing_metadata():
         )
 
 
+def test_staged_record_scores_rejects_conflicting_label_within_record():
+    validation = _validation()
+    validation.loc[1, "label"] = LABEL_ORDER[1]
+
+    with pytest.raises(ValueError, match=r"record.*conflict.*label"):
+        staged_record_scores(
+            FakeStagedModel([np.full((12, 6), 1 / 6)]),
+            validation,
+            ["f1", "f2"],
+            [1],
+            LABEL_ORDER,
+        )
+
+
+def test_staged_record_scores_rejects_missing_nonmissing_metadata_conflict():
+    validation = _validation()
+    validation.loc[1, "motor"] = None
+
+    with pytest.raises(ValueError, match=r"record.*conflict.*motor"):
+        staged_record_scores(
+            FakeStagedModel([np.full((12, 6), 1 / 6)]),
+            validation,
+            ["f1", "f2"],
+            [1],
+            LABEL_ORDER,
+        )
+
+
 def test_select_iterations_runs_one_real_catboost_model_per_reusable_fold(monkeypatch):
     import ablation_analysis.iteration_selection as module
 
@@ -286,3 +314,72 @@ def test_select_iterations_rejects_indices_that_do_not_match_manifest(monkeypatc
 
     with pytest.raises(ValueError, match="manifest"):
         select_iterations(train, ["f1"], (manifest, tampered, fold_hash), checkpoints=[1])
+
+
+def _six_class_feature_train():
+    labels, record_ids = _fold_inputs()
+    train = pd.DataFrame(
+        {
+            "record_id": record_ids,
+            "label": labels,
+            "motor": "M",
+            "rpm": 740,
+            "condition": "C",
+            "state": "S",
+            "severity": "N",
+        }
+    )
+    class_number = train["label"].map({label: index for index, label in enumerate(LABEL_ORDER)}).astype(float)
+    window_offset = np.tile([0.0, 0.01], len(train) // 2)
+    for index, feature in enumerate(FEATURE_43):
+        train[feature] = class_number + window_offset + index / 1000
+    return train
+
+
+def test_real_catboost_max800_emits_every_production_checkpoint():
+    from catboost import CatBoostClassifier, Pool
+
+    train = _six_class_feature_train()
+    model = CatBoostClassifier(
+        iterations=800,
+        depth=2,
+        learning_rate=0.1,
+        loss_function="MultiClass",
+        random_seed=2026,
+        allow_writing_files=False,
+        verbose=False,
+        thread_count=1,
+    )
+    model.fit(Pool(train[FEATURE_40], train["label"]))
+
+    scores = staged_record_scores(model, train, FEATURE_40, ITERATION_GRID, list(model.classes_))
+
+    assert scores["iteration"].tolist() == ITERATION_GRID
+    assert len(scores) == 40
+
+
+def test_same_external_folds_are_reused_for_feature43_and_feature40(monkeypatch):
+    import ablation_analysis.iteration_selection as module
+
+    train = _six_class_feature_train()
+    folds = make_record_folds(train["label"], train["record_id"])
+    monkeypatch.setattr(module, "MAX_ITERATIONS", 1)
+
+    full = select_iterations(train, FEATURE_43, folds[0], folds[1], checkpoints=[1])
+    reduced = select_iterations(train, FEATURE_40, folds[0], folds[1], checkpoints=[1])
+
+    assert full["fold_hash"] == reduced["fold_hash"] == folds[2]
+    assert full["fold_scores"]["fold"].tolist() == reduced["fold_scores"]["fold"].tolist()
+
+
+@pytest.mark.parametrize("column,bad_value", [("label", LABEL_ORDER[1]), ("condition", None)])
+def test_select_iterations_reasserts_record_consistency_before_external_folds(
+    monkeypatch, column, bad_value
+):
+    train = _six_class_feature_train()
+    folds = make_record_folds(train["label"], train["record_id"])
+    train.loc[1, column] = bad_value
+    monkeypatch.setattr("ablation_analysis.iteration_selection.MAX_ITERATIONS", 1)
+
+    with pytest.raises(ValueError, match=rf"record.*conflict.*{column}"):
+        select_iterations(train, FEATURE_40, folds, checkpoints=[1])
