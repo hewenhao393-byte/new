@@ -18,7 +18,7 @@ from baseline_analysis.evaluation import evaluate_predictions, fuse_records
 from baseline_analysis.acceptance import accept_feature_tables
 from baseline_analysis.config import MODEL_PARAMS
 
-from .config import FEATURE_40, FEATURE_43, JOIN_KEYS, LABEL_ORDER
+from .config import CV_SPLITS, FEATURE_40, FEATURE_43, ITERATION_GRID, JOIN_KEYS, LABEL_ORDER, MAX_ITERATIONS, REMOVED_FEATURES
 from .input_validation import validate_and_merge_inputs
 from .iteration_selection import _validate_manifest, aggregate_cv_scores, choose_iteration, staged_record_scores
 from .confusion_diagnostics import assign_target_group, effect_size_table, grouped_feature_summary, targeted_error_concentration
@@ -134,12 +134,28 @@ def verify_output(output_root, *, deep: bool = True, _accepted=None) -> pd.DataF
     if not grid or grid != sorted(set(grid)) or any(value < 1 for value in grid):
         raise ValueError("iteration grid is not canonical")
     passed("manifest", "iteration_grid", json.dumps(grid))
+    expected_protocol = {
+        "iteration_grid": ITERATION_GRID, "max_iterations": MAX_ITERATIONS, "cv_splits": CV_SPLITS,
+        "selection_metric": "mean training-CV record-level Macro-F1",
+        "tie_rule": "smallest iteration within atol=1e-12 rtol=0",
+        "grouping": "record_id for record and temporal",
+        "catboost_params_except_iterations": {key: value for key, value in MODEL_PARAMS.items() if key != "iterations"},
+        "feature_sets": {"features_43": FEATURE_43, "features_40": FEATURE_40},
+        "removed_features": REMOVED_FEATURES, "label_order": LABEL_ORDER,
+    }
+    for key, expected in expected_protocol.items():
+        if manifest.get(key) != expected:
+            raise ValueError(f"manifest protocol mismatch: {key}")
+    passed("manifest", "fixed_protocol", "all constants pinned")
 
     expected_inputs = {
         *(str((source / folder / f"features_ch{channel}.csv").resolve())
           for folder in ("file_split", "temporal_split") for channel in (3, 4, 5)),
         *(str((baseline / "models" / mode / f"ch{channel}" / "window_predictions.csv").resolve())
           for mode in ("record", "temporal") for channel in (3, 4, 5)),
+        *(str((baseline / "models" / mode / f"ch{channel}" / filename).resolve())
+          for mode in ("record", "temporal") for channel in (3, 4, 5)
+          for filename in ("window_metrics.json", "record_metrics.json")),
         str((baseline / "correlations" / "pearson_high_correlation_pairs.csv").resolve()),
     }
     temporal_input = source / "temporal_split" / "temporal_split.csv"
@@ -221,6 +237,11 @@ def verify_output(output_root, *, deep: bool = True, _accepted=None) -> pd.DataF
             if not np.all(validation_counts == 1):
                 raise ValueError(f"fold validation coverage mismatch for {mode} ch{channel}")
             fold_hashes[(mode, channel)] = fold_hash
+            fold_entry = manifest.get("fold_artifacts", {}).get(f"{mode}_ch{channel}")
+            expected_fold_entry = {"fold_sha256": fold_hash, "manifest_file_sha256": _sha256(fold_path),
+                                   "indices_file_sha256": _sha256(index_path)}
+            if fold_entry != expected_fold_entry:
+                raise ValueError(f"manifest fold artifact hash mismatch for {mode} ch{channel}")
             passed("fold", f"{mode}_ch{channel}", fold_hash)
 
             baseline_predictions = pd.read_csv(
@@ -469,6 +490,11 @@ def verify_output(output_root, *, deep: bool = True, _accepted=None) -> pd.DataF
                 raise ValueError(f"persisted figure pixel mismatch: {saved_path}")
     passed("figure_fidelity", "deterministic_rerender", str(render_root))
 
+    if not deep and (root / "verification_report.csv").is_file():
+        prior = pd.read_csv(root / "verification_report.csv")
+        prior_deep = prior[prior.category.eq("deep_cv")]
+        if len(prior_deep) == 12 and prior_deep.passed.all() and not prior_deep.duplicated(["category", "item"]).any():
+            checks.extend(prior_deep.to_dict("records"))
     report = pd.DataFrame(checks, columns=["category", "item", "passed", "detail"])
     if report.duplicated(["category", "item"]).any():
         raise ValueError("verification check IDs are not unique")

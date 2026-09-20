@@ -13,7 +13,8 @@ import pandas as pd
 
 from baseline_analysis.acceptance import accept_feature_tables, write_acceptance
 
-from .config import CV_SPLITS, FEATURE_40, FEATURE_43, ITERATION_GRID, LABEL_ORDER, MAX_ITERATIONS
+from .config import CV_SPLITS, FEATURE_40, FEATURE_43, ITERATION_GRID, LABEL_ORDER, MAX_ITERATIONS, REMOVED_FEATURES
+from baseline_analysis.config import MODEL_PARAMS
 from .confusion_diagnostics import (
     assign_target_group,
     effect_size_table,
@@ -211,6 +212,11 @@ def run_pipeline(
     if temporal_manifest.is_file():
         source_paths.append(temporal_manifest)
     input_paths = [*source_paths, *prediction_paths.values(), correlation_path]
+    input_paths.extend(
+        baseline / "models" / mode / f"ch{channel}" / filename
+        for mode in ("record", "temporal") for channel in (3, 4, 5)
+        for filename in ("window_metrics.json", "record_metrics.json")
+    )
     pre_read_hashes = _hash_inputs(input_paths)
 
     correlation_path, consolidated = _load_correlation_audit(baseline)
@@ -290,6 +296,20 @@ def run_pipeline(
             "feature_sets": {"features_43": FEATURE_43, "features_40": FEATURE_40},
             "iteration_grid": [int(value) for value in ITERATION_GRID],
             "max_iterations": int(MAX_ITERATIONS), "cv_splits": int(CV_SPLITS),
+            "selection_metric": "mean training-CV record-level Macro-F1",
+            "tie_rule": "smallest iteration within atol=1e-12 rtol=0",
+            "grouping": "record_id for record and temporal",
+            "catboost_params_except_iterations": {key: value for key, value in MODEL_PARAMS.items() if key != "iterations"},
+            "removed_features": REMOVED_FEATURES,
+            "label_order": LABEL_ORDER,
+            "fold_artifacts": {
+                f"{mode}_ch{channel}": {
+                    "fold_sha256": fold_inputs[(mode, channel)][1][2],
+                    "manifest_file_sha256": _sha256(folds_dir / f"{mode}_ch{channel}.csv"),
+                    "indices_file_sha256": _sha256(folds_dir / f"{mode}_ch{channel}_indices.npz"),
+                }
+                for mode in ("record", "temporal") for channel in (3, 4, 5)
+            },
             "input_sha256": preflight_hashes,
         }
         (staging / "run_manifest.json").write_text(

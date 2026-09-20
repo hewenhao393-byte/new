@@ -59,6 +59,8 @@ def _build_fixture(tmp_path, monkeypatch):
             for label_name in labels:
                 predictions[label_name] = predictions["label"].eq(label_name).astype(float)
             predictions.to_csv(prediction_dir / "window_predictions.csv", index=False)
+            for metric_name in ("window_metrics.json", "record_metrics.json"):
+                (prediction_dir / metric_name).write_text(json.dumps({"fixture": True}), encoding="utf-8")
     temporal_records = sorted(tables["temporal"][3].record_id.unique())
     pd.DataFrame([{"record_id": record_id, "train_start": 20000, "train_end": 39200,
                    "guard_start": 8000, "guard_end": 20000, "test_start": 0, "test_end": 8000,
@@ -82,6 +84,8 @@ def _build_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "ITERATION_GRID", [2, 4])
     monkeypatch.setattr(pipeline, "MAX_ITERATIONS", 4)
     monkeypatch.setattr(config, "ITERATION_GRID", [2, 4])
+    monkeypatch.setattr(verification, "ITERATION_GRID", [2, 4])
+    monkeypatch.setattr(verification, "MAX_ITERATIONS", 4)
     output = tmp_path / "output"
     run_pipeline(source, baseline, output)
     return output
@@ -111,6 +115,7 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
     ("changed_diagnostic", "diagnostic"),
     ("coherent_label", "authoritative label"),
     ("replacement_png", "pixel mismatch"),
+    ("protocol_manifest", "manifest protocol mismatch"),
 ])
 def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, match):
     output = _build_fixture(tmp_path, monkeypatch)
@@ -161,6 +166,11 @@ def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, mat
     elif mutation == "coherent_label":
         path = run / "window_predictions.csv"; frame = pd.read_csv(path); frame.loc[0, "label"] = "汽蚀"; frame.to_csv(path, index=False)
         path = run / "record_predictions.csv"; frame = pd.read_csv(path); frame.loc[0, "label"] = "汽蚀"; frame.to_csv(path, index=False)
+    elif mutation == "protocol_manifest":
+        path = output / "run_manifest.json"; value = json.loads(path.read_text()); value["max_iterations"] = 820
+        value["cv_splits"] = 4; value["selection_metric"] = "coherently rewritten but invalid"
+        value["catboost_params_except_iterations"]["depth"] = 7
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     else:
         from PIL import Image as PILImage
         path = output / "figures" / "iteration_curves" / "ch3_record_features_40.png"

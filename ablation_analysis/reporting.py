@@ -515,7 +515,10 @@ def _plot_class_recalls(recalls: pd.DataFrame, output: Path, font: FontPropertie
             ax.set_ylabel("Recall")
             ax.set_ylim(0, 1.05)
             ax.set_xticklabels(LABEL_ORDER, rotation=0, fontproperties=font)
-            ax.legend(fontsize=8, ncol=3)
+            handles, _ = ax.get_legend_handles_labels()
+            labels = [f"CH{channel} {'43维' if feature_set == 'features_43' else '40维'}"
+                      for feature_set, channel in pivot.columns]
+            ax.legend(handles, labels, prop=font, fontsize=8, ncol=3)
             ax.grid(axis="y", alpha=0.25)
             fig.tight_layout()
             fig.savefig(output / f"{split}_{level}.png")

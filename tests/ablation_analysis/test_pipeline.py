@@ -127,6 +127,8 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
             for label in labels:
                 predictions[label] = predictions["label"].eq(label).astype(float)
             predictions.to_csv(prediction_dir / "window_predictions.csv", index=False)
+            for metric_name in ("window_metrics.json", "record_metrics.json"):
+                (prediction_dir / metric_name).write_text(json.dumps({"fixture": True}), encoding="utf-8")
 
     def accepted(_source):
         return pd.DataFrame([{"check": "injected", "measured": 0, "threshold": 0, "passed": True, "detail": ""}]), tables
@@ -148,10 +150,13 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
 
     import ablation_analysis.config as ablation_config
     import ablation_analysis.pipeline as pipeline_module
+    import ablation_analysis.verification as verification_module
     monkeypatch.setattr(pipeline_module, "accept_feature_tables", accepted)
     monkeypatch.setattr(pipeline_module, "ITERATION_GRID", [2, 4])
     monkeypatch.setattr(pipeline_module, "MAX_ITERATIONS", 4)
     monkeypatch.setattr(ablation_config, "ITERATION_GRID", [2, 4])
+    monkeypatch.setattr(verification_module, "ITERATION_GRID", [2, 4])
+    monkeypatch.setattr(verification_module, "MAX_ITERATIONS", 4)
 
     output = tmp_path / "output"
     result = run_pipeline(source, baseline, output)
