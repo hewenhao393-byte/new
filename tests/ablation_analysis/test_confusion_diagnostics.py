@@ -24,7 +24,25 @@ from ablation_analysis.confusion_diagnostics import (
     ],
 )
 def test_assign_target_group_exact_mapping(label, predicted, expected):
-    assert assign_target_group(label, predicted) == expected
+    result = assign_target_group(pd.Series([label], index=["row"]), pd.Series([predicted], index=["row"]))
+    assert result.index.tolist() == ["row"]
+    assert result.iloc[0] == expected or (expected is None and pd.isna(result.iloc[0]))
+
+
+def test_assign_target_group_vectorized_mapping_preserves_index():
+    index = pd.Index([10, 20, 30, 40, 50], name="source_row")
+    actual = pd.Series(["松动", "松动", "轴承故障", "轴承故障", "正常"], index=index)
+    predicted = pd.Series(["松动", "轴承故障", "轴承故障", "松动", "正常"], index=index)
+
+    result = assign_target_group(actual, predicted)
+
+    expected = pd.Series(
+        ["correct_looseness", "looseness_to_bearing", "correct_bearing", "bearing_to_looseness", None],
+        index=index,
+        name="target_group",
+        dtype=object,
+    )
+    pd.testing.assert_series_equal(result, expected)
 
 
 def test_grouped_summary_reports_window_record_and_quartile_statistics():
@@ -69,10 +87,14 @@ def test_record_feature_medians_balance_many_windows_against_one_record():
 
 
 def test_cliffs_delta_direction_magnitude_and_ties():
-    assert cliffs_delta([3, 4], [1, 2]) == (1.0, 1.0, "large")
-    assert cliffs_delta([1, 2], [3, 4]) == (-1.0, 1.0, "large")
-    assert cliffs_delta([1, 2], [1, 2]) == (0.0, 0.0, "negligible")
-    assert cliffs_delta([1, 2], [1, 3])[0] == -0.25
+    assert cliffs_delta([3, 4], [1, 2]) == {"delta": 1.0, "abs_delta": 1.0, "magnitude": "large"}
+    assert cliffs_delta([1, 2], [3, 4]) == {"delta": -1.0, "abs_delta": 1.0, "magnitude": "large"}
+    assert cliffs_delta([1, 2], [1, 2]) == {
+        "delta": 0.0,
+        "abs_delta": 0.0,
+        "magnitude": "negligible",
+    }
+    assert cliffs_delta([1, 2], [1, 3])["delta"] == -0.25
 
 
 @pytest.mark.parametrize(
@@ -84,7 +106,17 @@ def test_cliffs_delta_direction_magnitude_and_ties():
     ],
 )
 def test_cliffs_delta_magnitude_threshold_bands(x, y, expected):
-    assert cliffs_delta(x, y)[2] == expected
+    assert cliffs_delta(x, y)["magnitude"] == expected
+
+
+@pytest.mark.parametrize(
+    "absolute,expected",
+    [(0.146999, "negligible"), (0.147, "small"), (0.33, "medium"), (0.474, "large")],
+)
+def test_cliffs_delta_magnitude_exact_boundaries(absolute, expected):
+    from ablation_analysis.confusion_diagnostics import _cliffs_magnitude
+
+    assert _cliffs_magnitude(absolute) == expected
 
 
 @pytest.mark.parametrize("x,y", [([], [1]), ([1], []), ([np.nan], [1]), ([1], [np.inf])])
@@ -172,3 +204,21 @@ def test_targeted_error_concentration_counts_records_and_top5_share_with_metadat
         "top5_error_windows": 20,
         "top5_share": pytest.approx(20 / 21),
     }
+
+
+@pytest.mark.parametrize("missing", ["record_id", "motor", "rpm", "condition", "state", "severity"])
+def test_targeted_error_concentration_requires_all_record_metadata(missing):
+    frame = pd.DataFrame(
+        {
+            "target_group": ["looseness_to_bearing"],
+            "record_id": ["r1"],
+            "motor": ["M2"],
+            "rpm": [740],
+            "condition": ["c"],
+            "state": ["s"],
+            "severity": [1],
+        }
+    ).drop(columns=missing)
+
+    with pytest.raises(ValueError, match=rf"missing required columns.*{missing}"):
+        targeted_error_concentration(frame)

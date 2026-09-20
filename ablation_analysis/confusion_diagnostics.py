@@ -25,9 +25,22 @@ ERROR_GROUPS = ("looseness_to_bearing", "bearing_to_looseness")
 METADATA_COLUMNS = ("motor", "rpm", "condition", "state", "severity")
 
 
-def assign_target_group(label, predicted_label):
-    """Return the exact looseness/bearing diagnostic group, or ``None``."""
+def _assign_target_group_scalar(label, predicted_label):
     return TARGET_GROUPS.get((label, predicted_label))
+
+
+def assign_target_group(actual: pd.Series, predicted: pd.Series) -> pd.Series:
+    """Map actual/predicted label Series while preserving their shared index."""
+    if not isinstance(actual, pd.Series) or not isinstance(predicted, pd.Series):
+        raise TypeError("actual and predicted must be pandas Series")
+    if not actual.index.equals(predicted.index):
+        raise ValueError("actual and predicted indexes must match")
+    return pd.Series(
+        [_assign_target_group_scalar(label, prediction) for label, prediction in zip(actual, predicted)],
+        index=actual.index,
+        name="target_group",
+        dtype=object,
+    )
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
@@ -86,6 +99,16 @@ def record_feature_medians(frame: pd.DataFrame, feature_columns: Sequence[str]) 
     )
 
 
+def _cliffs_magnitude(absolute_delta: float) -> str:
+    if absolute_delta < 0.147:
+        return "negligible"
+    if absolute_delta < 0.33:
+        return "small"
+    if absolute_delta < 0.474:
+        return "medium"
+    return "large"
+
+
 def cliffs_delta(x: Iterable[float], y: Iterable[float]):
     """Return signed Cliff's delta, absolute delta, and magnitude label."""
     try:
@@ -101,15 +124,7 @@ def cliffs_delta(x: Iterable[float], y: Iterable[float]):
     comparisons = x_values[:, None] - y_values[None, :]
     delta = float((np.count_nonzero(comparisons > 0) - np.count_nonzero(comparisons < 0)) / comparisons.size)
     absolute = abs(delta)
-    if absolute < 0.147:
-        magnitude = "negligible"
-    elif absolute < 0.33:
-        magnitude = "small"
-    elif absolute < 0.474:
-        magnitude = "medium"
-    else:
-        magnitude = "large"
-    return delta, absolute, magnitude
+    return {"delta": delta, "abs_delta": absolute, "magnitude": _cliffs_magnitude(absolute)}
 
 
 def effect_size_table(frame: pd.DataFrame, feature_columns: Sequence[str]) -> pd.DataFrame:
@@ -120,7 +135,7 @@ def effect_size_table(frame: pd.DataFrame, feature_columns: Sequence[str]) -> pd
         for group_a, group_b in EFFECT_COMPARISONS:
             values_a = record_medians.loc[record_medians["target_group"].eq(group_a), feature]
             values_b = record_medians.loc[record_medians["target_group"].eq(group_b), feature]
-            delta, absolute, magnitude = cliffs_delta(values_a, values_b)
+            effect = cliffs_delta(values_a, values_b)
             rows.append(
                 {
                     "feature": feature,
@@ -128,9 +143,9 @@ def effect_size_table(frame: pd.DataFrame, feature_columns: Sequence[str]) -> pd
                     "group_b": group_b,
                     "n_records_a": len(values_a),
                     "n_records_b": len(values_b),
-                    "delta": delta,
-                    "abs_delta": absolute,
-                    "magnitude": magnitude,
+                    "delta": effect["delta"],
+                    "abs_delta": effect["abs_delta"],
+                    "magnitude": effect["magnitude"],
                     "small_sample": len(values_a) < 5 or len(values_b) < 5,
                 }
             )
@@ -142,14 +157,10 @@ def targeted_error_concentration(frame: pd.DataFrame):
     if "target_group" not in frame.columns:
         _require_columns(frame, ["label", "predicted_label"])
         frame = frame.copy()
-        frame["target_group"] = [
-            assign_target_group(label, predicted)
-            for label, predicted in zip(frame["label"], frame["predicted_label"])
-        ]
-    _require_columns(frame, ["record_id"])
+        frame["target_group"] = assign_target_group(frame["label"], frame["predicted_label"])
+    _require_columns(frame, ["record_id", *METADATA_COLUMNS])
     errors = frame.loc[frame["target_group"].isin(ERROR_GROUPS)].copy()
-    metadata = [column for column in METADATA_COLUMNS if column in errors.columns]
-    group_columns = ["target_group", "record_id"] + metadata
+    group_columns = ["target_group", "record_id", *METADATA_COLUMNS]
     per_record = (
         errors.groupby(group_columns, dropna=False, sort=False)
         .size()
