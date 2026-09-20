@@ -13,7 +13,8 @@ from catboost import CatBoostClassifier, Pool
 from baseline_analysis.config import MODEL_PARAMS
 from baseline_analysis.evaluation import evaluate_predictions, fuse_records
 
-from .config import FEATURE_40, FEATURE_43, ITERATION_GRID, LABEL_ORDER
+from . import config as ablation_config
+from .config import FEATURE_40, FEATURE_43, LABEL_ORDER
 
 
 _META = ["record_id", "window_id", "label", "motor", "rpm", "condition", "state", "severity", "start_sample", "end_sample"]
@@ -42,16 +43,13 @@ def train_selected_model(
     fold_scores: pd.DataFrame,
     iteration_summary: pd.DataFrame,
     output_dir,
-    *,
-    iteration_grid: Sequence[int] = ITERATION_GRID,
 ):
     """Fit once on the prescribed training split and evaluate once on test."""
     features = list(feature_names)
     if features not in (FEATURE_43, FEATURE_40):
         raise ValueError("feature_names must be exactly FEATURE_43 or FEATURE_40 in contract order")
-    grid = [int(value) for value in iteration_grid]
-    if selected_iteration not in grid:
-        raise ValueError("selected_iteration must belong to the iteration grid")
+    if selected_iteration not in ablation_config.ITERATION_GRID:
+        raise ValueError("selected_iteration must belong to config.ITERATION_GRID")
     if split_mode not in {"record", "temporal"}:
         raise ValueError("split_mode must be record or temporal")
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,10 @@ from .input_validation import validate_and_merge_inputs
 from .iteration_selection import make_record_folds, select_iterations
 from .modeling import train_selected_model
 from .redundancy import consolidate_pairs, redundancy_decisions
+
+
+_JOIN_KEYS = ["record_id", "window_id", "start_sample", "end_sample"]
+_CORRELATION_COLUMNS = ["feature_a", "feature_b", "pearson_r", "channel", "split_mode"]
 
 
 def build_run_matrix() -> pd.DataFrame:
@@ -56,12 +60,32 @@ def _prediction_path(root: Path, mode: str, channel: int) -> Path:
     raise FileNotFoundError(f"baseline window predictions not found for {mode} ch{channel}")
 
 
-def _correlation_path(root: Path) -> Path | None:
-    candidates = [
-        root / "correlations" / "pearson_high_correlation_pairs.csv",
-        root / "pearson_high_correlation_pairs.csv",
-    ]
-    return next((path for path in candidates if path.is_file()), None)
+def _load_correlation_audit(root: Path):
+    path = root / "correlations" / "pearson_high_correlation_pairs.csv"
+    if not path.is_file():
+        raise FileNotFoundError(f"required baseline correlation audit not found: {path}")
+    rows = pd.read_csv(path)
+    missing = [column for column in _CORRELATION_COLUMNS if column not in rows.columns]
+    if missing:
+        raise ValueError(f"baseline correlation audit missing required columns: {missing}")
+    if len(rows) != 19:
+        raise ValueError(f"baseline correlation audit must contain exactly 19 rows, got {len(rows)}")
+    consolidated = consolidate_pairs(rows.loc[:, _CORRELATION_COLUMNS])
+    return path, consolidated
+
+
+def _validate_test_prediction_coverage(features: pd.DataFrame, predictions: pd.DataFrame) -> None:
+    test = features.loc[features["split"].eq("test"), _JOIN_KEYS]
+    prediction_keys = predictions.loc[:, _JOIN_KEYS]
+    if test.duplicated(_JOIN_KEYS).any() or prediction_keys.duplicated(_JOIN_KEYS).any():
+        raise ValueError("test features and baseline predictions must have unique JOIN_KEYS")
+    expected = set(map(tuple, test.itertuples(index=False, name=None)))
+    actual = set(map(tuple, prediction_keys.itertuples(index=False, name=None)))
+    if len(test) != len(predictions) or expected != actual:
+        raise ValueError(
+            "baseline predictions must cover all and only feature rows with split=='test': "
+            f"expected={len(test)}, actual={len(predictions)}, missing={len(expected - actual)}, extra={len(actual - expected)}"
+        )
 
 
 def _diagnostics(merged: pd.DataFrame, output: Path, features: Sequence[str]) -> None:
@@ -90,11 +114,6 @@ def run_pipeline(
     feature_source_root,
     baseline_root,
     output_root,
-    *,
-    checkpoints: Sequence[int] = ITERATION_GRID,
-    max_iterations: int = MAX_ITERATIONS,
-    cv_splits: int = CV_SPLITS,
-    acceptance_loader: Callable = accept_feature_tables,
 ):
     """Run all 12 paired ablations; test rows never enter fold construction or CV."""
     source = Path(feature_source_root)
@@ -103,7 +122,8 @@ def run_pipeline(
     if root.exists():
         raise FileExistsError(f"output directory already exists: {root}")
 
-    acceptance, tables = acceptance_loader(source)
+    correlation_path, consolidated = _load_correlation_audit(baseline)
+    acceptance, tables = accept_feature_tables(source)
     prediction_paths = {}
     merged_inputs = {}
     for mode in ("record", "temporal"):
@@ -111,6 +131,7 @@ def run_pipeline(
             path = _prediction_path(baseline, mode, channel)
             prediction_paths[(mode, channel)] = path
             predictions = pd.read_csv(path, low_memory=False)
+            _validate_test_prediction_coverage(tables[mode][channel], predictions)
             merged_inputs[(mode, channel)] = validate_and_merge_inputs(tables[mode][channel], predictions)
 
     root.mkdir(parents=True)
@@ -122,14 +143,6 @@ def run_pipeline(
     redundancy_decisions(FEATURE_43).to_csv(
         redundancy_dir / "feature_decisions.csv", index=False, encoding="utf-8-sig"
     )
-    correlation_path = _correlation_path(baseline)
-    if correlation_path is None:
-        consolidated = pd.DataFrame(
-            columns=["feature_a", "feature_b", "occurrence_count", "channels", "split_modes", "min_abs_r", "max_abs_r", "signs"]
-        )
-    else:
-        correlation_rows = pd.read_csv(correlation_path)
-        consolidated = consolidate_pairs(correlation_rows)
     consolidated.to_csv(redundancy_dir / "consolidated_high_correlation_pairs.csv", index=False, encoding="utf-8-sig")
 
     diagnostics_dir = root / "diagnostics"
@@ -144,7 +157,7 @@ def run_pipeline(
             data = tables[mode][channel]
             training_split = "train_dev" if mode == "record" else "train"
             train = data.loc[data["split"].eq(training_split)].reset_index(drop=True)
-            folds = make_record_folds(train["label"], train["record_id"], n_splits=cv_splits)
+            folds = make_record_folds(train["label"], train["record_id"], n_splits=CV_SPLITS)
             manifest, fold_indices, fold_hash = folds
             stem = f"{mode}_ch{channel}"
             manifest.to_csv(folds_dir / f"{stem}.csv", index=False, encoding="utf-8-sig")
@@ -163,8 +176,8 @@ def run_pipeline(
                     train,
                     features,
                     folds,
-                    checkpoints=checkpoints,
-                    max_iterations=max_iterations,
+                    checkpoints=ITERATION_GRID,
+                    max_iterations=MAX_ITERATIONS,
                 )
                 run_out = models_dir / mode / f"ch{channel}" / feature_set
                 result = train_selected_model(
@@ -177,7 +190,6 @@ def run_pipeline(
                     selection["fold_scores"],
                     selection["summary"],
                     run_out,
-                    iteration_grid=checkpoints,
                 )
                 run_rows.append(
                     {
@@ -200,8 +212,7 @@ def run_pipeline(
     ] + list(prediction_paths.values())
     if (source / "temporal_split" / "temporal_split.csv").is_file():
         input_paths.append(source / "temporal_split" / "temporal_split.csv")
-    if correlation_path is not None:
-        input_paths.append(correlation_path)
+    input_paths.append(correlation_path)
     run_manifest = {
         "feature_source_root": str(source.resolve()),
         "baseline_root": str(baseline.resolve()),
@@ -209,9 +220,9 @@ def run_pipeline(
         "channels": [3, 4, 5],
         "split_modes": ["record", "temporal"],
         "feature_sets": {"features_43": FEATURE_43, "features_40": FEATURE_40},
-        "iteration_grid": [int(value) for value in checkpoints],
-        "max_iterations": int(max_iterations),
-        "cv_splits": int(cv_splits),
+        "iteration_grid": [int(value) for value in ITERATION_GRID],
+        "max_iterations": int(MAX_ITERATIONS),
+        "cv_splits": int(CV_SPLITS),
         "input_sha256": {str(path.resolve()): _sha256(path) for path in input_paths},
     }
     (root / "run_manifest.json").write_text(

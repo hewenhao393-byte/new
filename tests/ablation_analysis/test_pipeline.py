@@ -53,10 +53,10 @@ def test_train_selected_model_enforces_iteration_and_feature_contract(tmp_path):
     folds = make_record_folds(train.label, train.record_id, n_splits=2)
     cv = pd.DataFrame({"fold": [1, 2], "iteration": [2, 2], "record_macro_f1": [0.5, 0.6]})
     summary = pd.DataFrame({"iteration": [2], "mean_record_macro_f1": [0.55], "std_record_macro_f1": [0.1], "fold_count": [2]})
-    with pytest.raises(ValueError, match="iteration grid"):
-        train_selected_model(frame, "record", 3, FEATURE_40, 3, folds[2], cv, summary, tmp_path / "bad", iteration_grid=[2, 4])
+    with pytest.raises(ValueError, match="ITERATION_GRID"):
+        train_selected_model(frame, "record", 3, FEATURE_40, 3, folds[2], cv, summary, tmp_path / "bad")
     with pytest.raises(ValueError, match="exactly FEATURE_43 or FEATURE_40"):
-        train_selected_model(frame, "record", 3, FEATURE_40[:-1], 2, folds[2], cv, summary, tmp_path / "bad2", iteration_grid=[2, 4])
+        train_selected_model(frame, "record", 3, FEATURE_40[:-1], 20, folds[2], cv, summary, tmp_path / "bad2")
 
 
 def test_pipeline_refuses_existing_output_before_validation(tmp_path):
@@ -70,7 +70,7 @@ def test_pipeline_refuses_existing_output_before_validation(tmp_path):
     assert list(output.iterdir()) == [marker]
 
 
-def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_path):
+def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_path, monkeypatch):
     source = tmp_path / "features"
     baseline = tmp_path / "baseline"
     tables = {"record": {}, "temporal": {}}
@@ -107,32 +107,40 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
             data.to_csv(source / folder / f"features_ch{channel}.csv", index=False)
             prediction_dir = baseline / "models" / mode / f"ch{channel}"
             prediction_dir.mkdir(parents=True, exist_ok=True)
-            predictions = data[
-                [
+            predictions = data.loc[data["split"].eq("test"), [
                     "record_id", "window_id", "label", "motor", "rpm", "condition", "state",
                     "severity", "start_sample", "end_sample", "split", "channel",
-                ]
-            ].copy()
+            ]].copy()
             predictions["predicted_label"] = predictions["label"]
             predictions.to_csv(prediction_dir / "window_predictions.csv", index=False)
 
+    def accepted(_source):
+        return pd.DataFrame([{"check": "injected", "measured": 0, "threshold": 0, "passed": True, "detail": ""}]), tables
+
+    pairs = []
+    for index in range(19):
+        pairs.append({
+            "feature_a": FEATURE_43[index], "feature_b": FEATURE_43[index + 1],
+            "pearson_r": 0.96, "channel": 3 + index % 3,
+            "split_mode": "record" if index % 2 == 0 else "temporal",
+        })
+    correlation_dir = baseline / "correlations"
+    correlation_dir.mkdir(parents=True)
+    pd.DataFrame(pairs).to_csv(correlation_dir / "pearson_high_correlation_pairs.csv", index=False)
     before = {
         path: path.read_bytes()
         for path in [*source.rglob("*.csv"), *baseline.rglob("*.csv")]
     }
 
-    def accepted(_source):
-        return pd.DataFrame([{"check": "injected", "measured": 0, "threshold": 0, "passed": True, "detail": ""}]), tables
+    import ablation_analysis.config as ablation_config
+    import ablation_analysis.pipeline as pipeline_module
+    monkeypatch.setattr(pipeline_module, "accept_feature_tables", accepted)
+    monkeypatch.setattr(pipeline_module, "ITERATION_GRID", [2, 4])
+    monkeypatch.setattr(pipeline_module, "MAX_ITERATIONS", 4)
+    monkeypatch.setattr(ablation_config, "ITERATION_GRID", [2, 4])
 
     output = tmp_path / "output"
-    result = run_pipeline(
-        source,
-        baseline,
-        output,
-        checkpoints=[2, 4],
-        max_iterations=4,
-        acceptance_loader=accepted,
-    )
+    result = run_pipeline(source, baseline, output)
     assert len(result) == 12
     run_dirs = list((output / "models").glob("*/ch*/features_*"))
     assert len(run_dirs) == 12
@@ -146,6 +154,16 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
         assert required.issubset({path.name for path in run_dir.iterdir()})
         metadata = json.loads((run_dir / "metadata.json").read_text())
         assert metadata["selected_iteration"] in [2, 4]
+        assert metadata["train_windows"] == 30
+        assert metadata["test_windows"] == 6
+        assert metadata["train_records"] == 30
+        assert metadata["test_records"] == 6
+        assert metadata["confidence"]["window_prediction_count"] == 6
+        assert metadata["confidence"]["record_prediction_count"] == 6
+        records = pd.read_csv(run_dir / "record_predictions.csv")
+        assert {"window_count", "valid_window_count", "mean_max_class_probability"}.issubset(records.columns)
+        assert records["valid_window_count"].eq(records["window_count"]).all()
+        assert records["mean_max_class_probability"].between(0, 1).all()
         assert (run_dir / "model.cbm").stat().st_size > 0
     for channel in (3, 4, 5):
         for mode in ("record", "temporal"):
@@ -155,4 +173,13 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
             manifest = pd.read_csv(output / "fold_manifests" / f"{mode}_ch{channel}.csv")
             training = tables[mode][channel].query("split == @full['training_split']")
             assert set(manifest.record_id) == set(training.record_id)
+            assert set(manifest.role) == {"fit", "validation"}
+            test_records = set(tables[mode][channel].query("split == 'test'").record_id)
+            assert not set(manifest.record_id) & test_records
+    run_manifest = json.loads((output / "run_manifest.json").read_text())
+    assert run_manifest["iteration_grid"] == [2, 4]
+    assert run_manifest["max_iterations"] == 4
+    assert run_manifest["cv_splits"] == 5
+    assert run_manifest["input_sha256"]
+    assert all(run_manifest["input_sha256"].values())
     assert {path: path.read_bytes() for path in before} == before
