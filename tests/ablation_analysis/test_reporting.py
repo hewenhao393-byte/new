@@ -176,15 +176,61 @@ def test_cv_confusion_aggregates_each_pair_before_taking_competing_max():
     assert evidence["looseness_other_max_offdiag_count"] == 6
 
 
-def test_chinese_font_fallback_warns_and_reports_metadata(monkeypatch, tmp_path):
+def test_chinese_font_fallback_rejects_non_cjk_and_selects_capable_font(monkeypatch, tmp_path):
     import ablation_analysis.reporting as reporting
     missing = tmp_path / "missing-font.ttc"
+    non_cjk = tmp_path / "a-non-cjk.ttf"
+    cjk = tmp_path / "b-cjk.ttf"
+    non_cjk.touch()
+    cjk.touch()
+
+    class FakeFont:
+        def __init__(self, path):
+            self.path = Path(path)
+
+        def get_charmap(self):
+            if self.path == cjk:
+                return {ord(character): 1 for character in reporting.REQUIRED_CJK_GLYPHS}
+            return {ord("A"): 1}
+
     monkeypatch.setattr(reporting, "CHINESE_FONT", missing)
+    monkeypatch.setattr(reporting, "CJK_CANDIDATE_PATHS", (non_cjk, cjk))
+    monkeypatch.setattr(reporting, "findSystemFonts", lambda: [])
+    monkeypatch.setattr(reporting, "FT2Font", FakeFont)
     with pytest.warns(RuntimeWarning, match="Chinese font"):
         _, metadata = _resolve_chinese_font()
     assert metadata["requested_path"] == str(missing)
     assert metadata["fallback_used"] is True
-    assert Path(metadata["resolved_path"]).is_file()
+    assert metadata["resolved_path"] == str(cjk)
+    assert metadata["glyph_check_passed"] is True
+    assert metadata["required_glyphs"] == reporting.REQUIRED_CJK_GLYPHS
+
+
+def test_chinese_font_resolver_raises_when_no_candidate_has_cjk_glyphs(monkeypatch, tmp_path):
+    import ablation_analysis.reporting as reporting
+    non_cjk = tmp_path / "non-cjk.ttf"
+    non_cjk.touch()
+
+    class NonCjkFont:
+        def __init__(self, path):
+            pass
+
+        def get_charmap(self):
+            return {ord("A"): 1}
+
+    monkeypatch.setattr(reporting, "CHINESE_FONT", tmp_path / "missing.ttc")
+    monkeypatch.setattr(reporting, "CJK_CANDIDATE_PATHS", (non_cjk,))
+    monkeypatch.setattr(reporting, "findSystemFonts", lambda: [str(non_cjk)])
+    monkeypatch.setattr(reporting, "FT2Font", NonCjkFont)
+    with pytest.raises(RuntimeError, match="CJK-capable font"):
+        _resolve_chinese_font()
+
+
+def test_current_mac_prefers_verified_stheiti_font():
+    _, metadata = _resolve_chinese_font()
+    assert metadata["resolved_path"] == "/System/Library/Fonts/STHeiti Medium.ttc"
+    assert metadata["fallback_used"] is False
+    assert metadata["glyph_check_passed"] is True
 
 
 def _write_json(path, value):

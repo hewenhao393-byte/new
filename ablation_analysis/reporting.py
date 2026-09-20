@@ -13,7 +13,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.font_manager import FontProperties, findfont
+from matplotlib.ft2font import FT2Font
+from matplotlib.font_manager import FontProperties, findSystemFonts
 
 from .config import LABEL_ORDER
 
@@ -23,6 +24,12 @@ SPLIT_MODES = ("record", "temporal")
 FEATURE_SETS = ("features_43", "features_40")
 LEVELS = ("window", "record")
 CHINESE_FONT = Path("/System/Library/Fonts/STHeiti Medium.ttc")
+REQUIRED_CJK_GLYPHS = "松动轴承故障真实类别预测"
+CJK_CANDIDATE_PATHS = (
+    Path("/System/Library/Fonts/STHeiti Light.ttc"),
+    Path("/System/Library/Fonts/Hiragino Sans GB.ttc"),
+    Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+)
 
 _DELTA_REQUIRED = [
     "channel",
@@ -220,14 +227,35 @@ def _read_json(path: Path) -> dict:
 
 def _resolve_chinese_font():
     requested = CHINESE_FONT
-    if requested.is_file():
+    required_codepoints = {ord(character) for character in REQUIRED_CJK_GLYPHS}
+
+    def supports_required_glyphs(path: Path) -> bool:
+        try:
+            available = set(FT2Font(str(path)).get_charmap())
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return required_codepoints.issubset(available)
+
+    preferred_exists = requested.is_file()
+    preferred_glyph_check = preferred_exists and supports_required_glyphs(requested)
+    if preferred_glyph_check:
         resolved = requested
         fallback = False
     else:
-        resolved = Path(findfont("DejaVu Sans", fallback_to_default=True))
+        system_paths = [Path(path) for path in findSystemFonts()]
+        candidates = sorted(
+            {path for path in (*CJK_CANDIDATE_PATHS, *system_paths) if path.is_file() and path != requested},
+            key=lambda path: str(path),
+        )
+        resolved = next((path for path in candidates if supports_required_glyphs(path)), None)
+        if resolved is None:
+            raise RuntimeError(
+                "No CJK-capable font contains all required Chinese glyphs; "
+                f"preferred={requested}, candidates_checked={len(candidates)}"
+            )
         fallback = True
         warnings.warn(
-            f"Chinese font not found at {requested}; falling back to {resolved}",
+            f"Chinese font unavailable or missing glyphs at {requested}; using verified CJK font {resolved}",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -235,6 +263,10 @@ def _resolve_chinese_font():
         "requested_path": str(requested),
         "resolved_path": str(resolved),
         "fallback_used": fallback,
+        "preferred_exists": preferred_exists,
+        "preferred_glyph_check_passed": preferred_glyph_check,
+        "glyph_check_passed": True,
+        "required_glyphs": REQUIRED_CJK_GLYPHS,
     }
 
 
