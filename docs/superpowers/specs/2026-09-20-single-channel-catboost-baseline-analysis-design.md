@@ -42,6 +42,8 @@
 
 record split仅使用 `split=train_dev`，temporal split仅使用 `split=train`。每个通道和每种划分单独计算43×43 Pearson相关矩阵，输出 `|r| >= 0.95` 的特征对。
 
+可同时输出Spearman相关矩阵作为非线性单调关系的补充证据，但正式高相关特征标记和建议删除清单仍只以Pearson `|r| >= 0.95` 为准。
+
 本阶段不删除任何特征。建议清单以确定性规则生成：优先保留缺失率低、数值稳定、跨record波动较小且物理含义明确的特征。`rot_2x_1x_ratio`、`rot_3x_1x_ratio`、`rot_05x_1x_ratio`、`harmonic_energy_ratio_1x_5x`及其他明确阶次/谐波特征即使高相关也标记为“物理特征，人工复核”，不机械列入删除项。
 
 ## CatBoost基线协议
@@ -61,7 +63,7 @@ random_seed = 2026
 allow_writing_files = False
 ```
 
-不使用StandardScaler，不使用测试集早停，不根据测试结果修改轮数、类别权重、阈值或参数。
+`iterations=540` 是为了六组实验公平可比而事先固定的baseline参数，不表述为当前43维数据的最优轮数。不使用StandardScaler，不使用测试集早停，不根据测试结果修改轮数、类别权重、阈值或参数。
 
 训练内部稳定性评价使用 `StratifiedGroupKFold`：
 
@@ -76,7 +78,7 @@ allow_writing_files = False
 
 额外输出正常误报率、联轴器不对中召回率、松动召回率、轴承故障召回率和汽蚀召回率。正常误报率定义为真实正常样本中被预测为任一故障的比例，窗口级与record级分别计算。
 
-保存每个测试窗口和record的真实标签、预测标签、六类概率及 `record_id/motor/rpm/condition/state/severity`。误分类按这些维度统计，单独输出正常→联轴器不对中和松动→轴承故障的record列表、错分窗数、总窗数和错分集中度。
+保存每个测试窗口和record的真实标签、预测标签、六类概率及 `record_id/motor/rpm/condition/state/severity`。record级预测表额外保存 `window_count`、`valid_window_count` 和 `mean_max_class_probability`；其中 `window_count` 是该record的全部测试窗数，`valid_window_count` 是概率向量通过有限性、范围和行和校验的窗数，`mean_max_class_probability` 是有效窗口的单窗最大类别概率均值。误分类按这些维度统计，单独输出正常→联轴器不对中和松动→轴承故障的record列表、错分窗数、总窗数和错分集中度。
 
 ## 特征重要性与结果对比
 
@@ -101,6 +103,8 @@ SHAP不是完成条件。只在不改变模型且对固定种子抽样计算的�
 ```
 
 `feature_acceptance` 包含完整验收表和不一致明细；`feature_quality` 包含分组统计、类间差异和跨record波动；`correlation` 包含六张相关矩阵、高相关特征对和建议清单；每个模型目录包含 `.cbm` 模型、参数、内部CV、窗口/record预测、指标、分类报告、混淆矩阵、错误来源和特征重要性。`comparison` 包含六组总对比表和按split/channel的差异表。
+
+`conclusion_report.md` 将“训练内部CV结果”、“独立测试窗口级结果”和“独立测试record级结果”分成独立小节和表格，不把CV折均值与测试指标混在同一列或使用含混标签。
 
 ## 验证策略
 
