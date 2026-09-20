@@ -1,0 +1,457 @@
+"""Deterministic reporting and decision rules for the paired ablation study."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Mapping
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.font_manager import FontProperties
+
+from .config import LABEL_ORDER
+
+
+CHANNELS = (3, 4, 5)
+SPLIT_MODES = ("record", "temporal")
+FEATURE_SETS = ("features_43", "features_40")
+LEVELS = ("window", "record")
+CHINESE_FONT = Path("/System/Library/Fonts/STHeiti Medium.ttc")
+
+_DELTA_REQUIRED = [
+    "channel",
+    "split_mode",
+    "record_macro_f1_delta",
+    "looseness_recall_delta",
+    "bearing_recall_delta",
+]
+
+
+def _validate_six_runs(frame: pd.DataFrame, numeric_columns) -> None:
+    missing = [column for column in ["channel", "split_mode", *numeric_columns] if column not in frame.columns]
+    if missing:
+        raise ValueError(f"missing required columns: {missing}")
+    if len(frame) != 6 or frame.duplicated(["channel", "split_mode"]).any():
+        raise ValueError("expected exactly six unique channel/split rows")
+    actual = set(zip(frame["channel"], frame["split_mode"]))
+    expected = {(channel, split) for channel in CHANNELS for split in SPLIT_MODES}
+    if actual != expected:
+        raise ValueError("channel/split coverage must be exactly CH3/CH4/CH5 x record/temporal")
+    try:
+        values = frame[list(numeric_columns)].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("guardrail values must be numeric") from exc
+    if not np.isfinite(values).all():
+        raise ValueError("guardrail values must be finite")
+
+
+def recommend_feature_set(deltas: pd.DataFrame) -> dict:
+    """Apply the pre-registered record-level 40-versus-43 guardrails."""
+    numeric = _DELTA_REQUIRED[2:]
+    _validate_six_runs(deltas, numeric)
+    limits = {
+        "record_macro_f1_delta": -0.005,
+        "looseness_recall_delta": -0.01,
+        "bearing_recall_delta": -0.01,
+    }
+    failures = []
+    ordered = deltas.sort_values(["channel", "split_mode"], kind="stable")
+    for row in ordered.itertuples(index=False):
+        for metric, minimum in limits.items():
+            value = float(getattr(row, metric))
+            if value < minimum:
+                failures.append(
+                    {
+                        "channel": int(row.channel),
+                        "split_mode": row.split_mode,
+                        "metric": metric,
+                        "value": value,
+                        "minimum": minimum,
+                    }
+                )
+    passed = not failures
+    return {
+        "recommended_feature_set": "features_40" if passed else "features_43",
+        "passed": passed,
+        "failed_guardrails": failures,
+    }
+
+
+def assess_ch5_unique_value(recalls: pd.DataFrame) -> dict:
+    """Judge CH5 class value only when its strict lead holds in both splits."""
+    required = ["channel", "split_mode", "class", "recall"]
+    missing = [column for column in required if column not in recalls.columns]
+    if missing:
+        raise ValueError(f"missing required columns: {missing}")
+    expected = {(c, s, label) for c in CHANNELS for s in SPLIT_MODES for label in LABEL_ORDER}
+    actual = set(zip(recalls["channel"], recalls["split_mode"], recalls["class"]))
+    if len(recalls) != len(expected) or recalls.duplicated(required[:3]).any() or actual != expected:
+        raise ValueError("recall coverage must be exactly channel/split/class")
+    try:
+        values = recalls["recall"].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("recall must be numeric") from exc
+    if not np.isfinite(values).all():
+        raise ValueError("recall must be finite")
+
+    rows = []
+    for label in LABEL_ORDER:
+        margins = {}
+        for split in SPLIT_MODES:
+            subset = recalls[(recalls["class"] == label) & (recalls["split_mode"] == split)]
+            ch5 = float(subset.loc[subset["channel"] == 5, "recall"].iloc[0])
+            comparator = float(subset.loc[subset["channel"].isin([3, 4]), "recall"].max())
+            margins[split] = ch5 - comparator
+        unique = margins["record"] > 0 and margins["temporal"] > 0
+        rows.append(
+            {
+                "class": label,
+                "record_margin_ch5_vs_best_ch3_ch4": margins["record"],
+                "temporal_margin_ch5_vs_best_ch3_ch4": margins["temporal"],
+                "direction_consistent": bool((margins["record"] > 0) == (margins["temporal"] > 0)),
+                "unique_value": bool(unique),
+            }
+        )
+    table = pd.DataFrame(rows)
+    return {"table": table, "unique_classes": table.loc[table["unique_value"], "class"].tolist()}
+
+
+def recommend_new_features(confusion_evidence: pd.DataFrame, effects: pd.DataFrame) -> dict:
+    """Apply the conservative conjunction for proposing a later feature study.
+
+    ``principal`` is supplied by the caller's confusion audit. Weak effects mean
+    at least two thirds of the pre-specified diagnostic effects are negligible
+    or small. The function never infers causality from either condition.
+    """
+    required = {"scope", "looseness_to_bearing_principal", "bearing_to_looseness_principal"}
+    missing = sorted(required - set(confusion_evidence.columns))
+    if missing:
+        raise ValueError(f"confusion evidence missing required columns: {missing}")
+    scopes = {"train_internal_cv", "test_window", "test_record"}
+    if (
+        len(confusion_evidence) != 3
+        or confusion_evidence["scope"].duplicated().any()
+        or set(confusion_evidence["scope"]) != scopes
+    ):
+        raise ValueError("confusion evidence must cover exactly the three prescribed scopes")
+    if "magnitude" not in effects.columns or effects.empty:
+        raise ValueError("diagnostic effects must contain non-empty magnitude values")
+    allowed = {"negligible", "small", "medium", "large"}
+    if not set(effects["magnitude"]).issubset(allowed):
+        raise ValueError("unknown diagnostic effect magnitude")
+    bidirectional = confusion_evidence[
+        ["looseness_to_bearing_principal", "bearing_to_looseness_principal"]
+    ].eq(True).all(axis=1)
+    failed = confusion_evidence.loc[~bidirectional, "scope"].tolist()
+    weak_share = float(effects["magnitude"].isin(["negligible", "small"]).mean())
+    weak = weak_share >= (2.0 / 3.0)
+    if not weak:
+        failed.append("diagnostic_effects_generally_weak")
+    return {
+        "recommend_new_features": not failed,
+        "failed_conditions": failed,
+        "weak_effect_share": weak_share,
+    }
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_model_artifacts(staging: Path):
+    metric_rows = []
+    recall_rows = []
+    curve_rows = []
+    for channel in CHANNELS:
+        for split in SPLIT_MODES:
+            for feature_set in FEATURE_SETS:
+                run = staging / "models" / split / f"ch{channel}" / feature_set
+                metadata = _read_json(run / "metadata.json")
+                curves = pd.read_csv(run / "internal_cv_iteration_summary.csv")
+                needed = {"iteration", "mean_record_macro_f1"}
+                if not needed.issubset(curves.columns):
+                    raise ValueError(f"iteration summary missing columns in {run}")
+                selected = int(metadata["selected_iteration"])
+                selected_rows = curves.loc[curves["iteration"].eq(selected), "mean_record_macro_f1"]
+                if len(selected_rows) != 1:
+                    raise ValueError(f"selected iteration must occur exactly once in {run}")
+                curve = curves.copy()
+                curve.insert(0, "feature_set", feature_set)
+                curve.insert(0, "split_mode", split)
+                curve.insert(0, "channel", channel)
+                curve_rows.append(curve)
+                window = _read_json(run / "window_metrics.json")
+                record = _read_json(run / "record_metrics.json")
+                metric_rows.append(
+                    {
+                        "channel": channel,
+                        "split_mode": split,
+                        "feature_set": feature_set,
+                        "selected_iteration": selected,
+                        "internal_cv_selected_record_macro_f1": float(selected_rows.iloc[0]),
+                        "test_window_accuracy": float(window["accuracy"]),
+                        "test_window_macro_f1": float(window["macro_f1"]),
+                        "test_window_weighted_f1": float(window["weighted_f1"]),
+                        "test_record_accuracy": float(record["accuracy"]),
+                        "test_record_macro_f1": float(record["macro_f1"]),
+                        "test_record_weighted_f1": float(record["weighted_f1"]),
+                    }
+                )
+                for level, metrics in (("window", window), ("record", record)):
+                    report = metrics["classification_report"]
+                    for label in LABEL_ORDER:
+                        recall_rows.append(
+                            {
+                                "channel": channel,
+                                "split_mode": split,
+                                "feature_set": feature_set,
+                                "evaluation_level": level,
+                                "class": label,
+                                "recall": float(report[label]["recall"]),
+                            }
+                        )
+    return pd.DataFrame(metric_rows), pd.DataFrame(recall_rows), pd.concat(curve_rows, ignore_index=True)
+
+
+def _build_deltas(metrics: pd.DataFrame, recalls: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for channel in CHANNELS:
+        for split in SPLIT_MODES:
+            subset = metrics[(metrics.channel == channel) & (metrics.split_mode == split)].set_index("feature_set")
+            row = {"channel": channel, "split_mode": split}
+            for column in (
+                "internal_cv_selected_record_macro_f1",
+                "test_window_accuracy",
+                "test_window_macro_f1",
+                "test_window_weighted_f1",
+                "test_record_accuracy",
+                "test_record_macro_f1",
+                "test_record_weighted_f1",
+            ):
+                row[f"{column}_delta"] = float(subset.loc["features_40", column] - subset.loc["features_43", column])
+            record_recalls = recalls[
+                (recalls.channel == channel)
+                & (recalls.split_mode == split)
+                & (recalls.evaluation_level == "record")
+            ].set_index(["feature_set", "class"])
+            row["record_macro_f1_delta"] = row.pop("test_record_macro_f1_delta")
+            row["looseness_recall_delta"] = float(
+                record_recalls.loc[("features_40", "松动"), "recall"]
+                - record_recalls.loc[("features_43", "松动"), "recall"]
+            )
+            row["bearing_recall_delta"] = float(
+                record_recalls.loc[("features_40", "轴承故障"), "recall"]
+                - record_recalls.loc[("features_43", "轴承故障"), "recall"]
+            )
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _aggregate_diagnostics(diagnostic_tables: Mapping):
+    grouped_rows, effect_rows, error_rows, concentration_rows = [], [], [], []
+    for (split, channel), (grouped, effects, errors, summary) in sorted(diagnostic_tables.items()):
+        for source, destination in ((grouped, grouped_rows), (effects, effect_rows), (errors, error_rows)):
+            enriched = source.copy()
+            enriched.insert(0, "channel", channel)
+            enriched.insert(1, "split_mode", split)
+            destination.append(enriched)
+        concentration_rows.append({"channel": channel, "split_mode": split, **summary})
+    return (
+        pd.concat(grouped_rows, ignore_index=True),
+        pd.concat(effect_rows, ignore_index=True),
+        pd.concat(error_rows, ignore_index=True),
+        pd.DataFrame(concentration_rows),
+    )
+
+
+def _plot_iteration_curves(curves: pd.DataFrame, output: Path) -> None:
+    font = FontProperties(fname=str(CHINESE_FONT))
+    output.mkdir(parents=True, exist_ok=True)
+    for (channel, split, feature_set), frame in curves.groupby(["channel", "split_mode", "feature_set"], sort=True):
+        fig, ax = plt.subplots(figsize=(8, 5), dpi=120)
+        ax.plot(frame["iteration"], frame["mean_record_macro_f1"], marker="o", linewidth=2)
+        ax.set_title(f"CH{channel} {split} {feature_set} 训练内部CV轮数曲线", fontproperties=font)
+        ax.set_xlabel("迭代轮数", fontproperties=font)
+        ax.set_ylabel("record级 Macro-F1", fontproperties=font)
+        ax.grid(alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(output / f"ch{channel}_{split}_{feature_set}.png")
+        plt.close(fig)
+
+
+def _plot_class_recalls(recalls: pd.DataFrame, output: Path) -> None:
+    font = FontProperties(fname=str(CHINESE_FONT))
+    output.mkdir(parents=True, exist_ok=True)
+    for split in SPLIT_MODES:
+        for level in LEVELS:
+            frame = recalls[(recalls.split_mode == split) & (recalls.evaluation_level == level)]
+            pivot = frame.pivot_table(index="class", columns=["feature_set", "channel"], values="recall")
+            pivot = pivot.reindex(LABEL_ORDER)
+            fig, ax = plt.subplots(figsize=(12, 6), dpi=120)
+            pivot.plot(kind="bar", ax=ax, width=0.85)
+            ax.set_title(f"{split} 独立测试{level}级各类Recall", fontproperties=font)
+            ax.set_xlabel("真实类别", fontproperties=font)
+            ax.set_ylabel("Recall")
+            ax.set_ylim(0, 1.05)
+            ax.set_xticklabels(LABEL_ORDER, rotation=0, fontproperties=font)
+            ax.legend(fontsize=8, ncol=3)
+            ax.grid(axis="y", alpha=0.25)
+            fig.tight_layout()
+            fig.savefig(output / f"{split}_{level}.png")
+            plt.close(fig)
+
+
+def _format_failures(decision: dict) -> str:
+    if decision["passed"]:
+        return "六组均满足 record 级 Macro-F1、松动 Recall 与轴承故障 Recall 的预注册下限。"
+    return "；".join(
+        f"CH{item['channel']} {item['split_mode']} {item['metric']}={item['value']:.6f} < {item['minimum']:.6f}"
+        for item in decision["failed_guardrails"]
+    )
+
+
+def _write_conclusion(
+    path: Path,
+    metrics: pd.DataFrame,
+    deltas: pd.DataFrame,
+    chosen_recalls: pd.DataFrame,
+    unique: dict,
+    decision: dict,
+    effects: pd.DataFrame,
+    concentration: pd.DataFrame,
+) -> None:
+    chosen = decision["recommended_feature_set"]
+    selected = metrics[metrics.feature_set == chosen]
+    iteration_lines = "\n".join(
+        f"- CH{row.channel} / {row.split_mode}: {int(row.selected_iteration)} 轮，CV record级 Macro-F1={row.internal_cv_selected_record_macro_f1:.4f}"
+        for row in selected.itertuples(index=False)
+    )
+    window_lines = "\n".join(
+        f"- CH{row.channel} / {row.split_mode}: Accuracy={row.test_window_accuracy:.4f}，Macro-F1={row.test_window_macro_f1:.4f}，Weighted-F1={row.test_window_weighted_f1:.4f}"
+        for row in selected.itertuples(index=False)
+    )
+    record_lines = "\n".join(
+        f"- CH{row.channel} / {row.split_mode}: Accuracy={row.test_record_accuracy:.4f}，Macro-F1={row.test_record_macro_f1:.4f}，Weighted-F1={row.test_record_weighted_f1:.4f}"
+        for row in selected.itertuples(index=False)
+    )
+    recall_lines = "\n".join(
+        f"- CH{row.channel} / {row.split_mode} / {row.evaluation_level} / {row['class']}: Recall={row.recall:.4f}"
+        for _, row in chosen_recalls.iterrows()
+    )
+    weak_share = float(effects["magnitude"].isin(["negligible", "small"]).mean()) if len(effects) else float("nan")
+    top5_mean = float(concentration["top5_share"].mean()) if len(concentration) else float("nan")
+    unique_text = "、".join(unique["unique_classes"]) if unique["unique_classes"] else "无"
+    delta_lines = "\n".join(
+        f"- CH{row.channel} / {row.split_mode}: record Macro-F1={row.record_macro_f1_delta:+.4f}，松动Recall={row.looseness_recall_delta:+.4f}，轴承故障Recall={row.bearing_recall_delta:+.4f}"
+        for row in deltas.itertuples(index=False)
+    )
+    text = f"""# 43维与40维去冗余消融结论
+
+## 训练内部 CV（仅用于轮数选择）
+
+{iteration_lines}
+
+这些分数来自训练集内部分组交叉验证，不是独立测试性能。
+
+## 独立测试窗口级
+
+{window_lines}
+
+## 独立测试 record 级
+
+{record_lines}
+
+## 43维 vs 40维与守门决策
+
+所有差值均定义为 `features_40 - features_43`，且松动/轴承守门使用 record 级 Recall。推荐 **{chosen}**。{_format_failures(decision)}
+{delta_lines}
+更完整的六组差值明细见 `comparison/ablation_deltas.csv`。
+
+## 推荐特征集的 CH3/CH4/CH5 分类 Recall
+
+{recall_lines}
+
+## CH5 独特价值判断
+
+CH5 只在 record 和 temporal 两种划分上都严格高于 CH3、CH4 时，才对该类判为具有独特价值。本次通过的类别：**{unique_text}**。逐类边际见 `comparison/ch5_unique_value.csv`。
+
+## 松动/轴承故障效应量、集中度与是否需要新特征
+
+定向 Cliff's delta 中可忽略或小效应的比例为 {weak_share:.1%}；六组定向错分的前5个record平均集中度为 {top5_mean:.1%}。
+保守规则要求：松动→轴承故障与轴承故障→松动必须同时是训练内部 CV、独立测试窗口级和独立测试 record 级的主要双向混淆，且诊断效应量总体偏弱，两项同时满足才建议新特征。现有内部 CV 工件只保存轮数分数，未保存折外类别错分方向，因而不能确证第一项；本次 **不建议仅据现有证据新增特征**。
+
+## 解释边界
+
+本报告是关联性的消融与错分诊断，**不作因果解释**，不将单一特征偏移解释为故障成因。
+"""
+    path.write_text(text, encoding="utf-8")
+
+
+def generate_reports(
+    staging_root,
+    diagnostic_tables: Mapping,
+    consolidated_pairs: pd.DataFrame,
+    feature_decisions: pd.DataFrame,
+) -> dict:
+    """Generate all decision tables, figures, and the bounded Chinese conclusion."""
+    staging = Path(staging_root)
+    diagnostics_dir = staging / "diagnostics"
+    redundancy_dir = staging / "redundancy"
+    iteration_dir = staging / "iteration_selection"
+    comparison_dir = staging / "comparison"
+    for directory in (diagnostics_dir, redundancy_dir, iteration_dir, comparison_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    grouped, effects, errors, concentration = _aggregate_diagnostics(diagnostic_tables)
+    grouped.to_csv(diagnostics_dir / "four_group_feature_statistics.csv", index=False, encoding="utf-8-sig")
+    effects.to_csv(diagnostics_dir / "record_level_cliffs_delta.csv", index=False, encoding="utf-8-sig")
+    errors.to_csv(diagnostics_dir / "targeted_error_records.csv", index=False, encoding="utf-8-sig")
+    concentration.to_csv(diagnostics_dir / "error_concentration.csv", index=False, encoding="utf-8-sig")
+    consolidated_pairs.to_csv(
+        redundancy_dir / "consolidated_high_correlation_pairs.csv", index=False, encoding="utf-8-sig"
+    )
+    feature_decisions.to_csv(
+        redundancy_dir / "feature_decisions_43_to_40.csv", index=False, encoding="utf-8-sig"
+    )
+
+    metrics, recalls, curves = _load_model_artifacts(staging)
+    deltas = _build_deltas(metrics, recalls)
+    decision = recommend_feature_set(deltas[_DELTA_REQUIRED])
+    chosen_recalls = recalls[recalls.feature_set.eq(decision["recommended_feature_set"])].copy()
+    record_recalls = chosen_recalls[chosen_recalls.evaluation_level.eq("record")][
+        ["channel", "split_mode", "class", "recall"]
+    ]
+    unique = assess_ch5_unique_value(record_recalls)
+
+    curves.to_csv(iteration_dir / "all_iteration_curves.csv", index=False, encoding="utf-8-sig")
+    metrics.to_csv(comparison_dir / "ablation_metrics.csv", index=False, encoding="utf-8-sig")
+    deltas.to_csv(comparison_dir / "ablation_deltas.csv", index=False, encoding="utf-8-sig")
+    recalls.to_csv(comparison_dir / "channel_class_recall.csv", index=False, encoding="utf-8-sig")
+    unique["table"].to_csv(comparison_dir / "ch5_unique_value.csv", index=False, encoding="utf-8-sig")
+    _plot_iteration_curves(curves, staging / "figures" / "iteration_curves")
+    _plot_class_recalls(recalls, staging / "figures" / "class_recall")
+    _write_conclusion(
+        staging / "conclusion.md", metrics, deltas, chosen_recalls, unique, decision, effects, concentration
+    )
+    return {"decision": decision, "ch5_unique_value": unique}
+
+
+REPORT_REQUIRED_FILES = (
+    "diagnostics/four_group_feature_statistics.csv",
+    "diagnostics/record_level_cliffs_delta.csv",
+    "diagnostics/targeted_error_records.csv",
+    "diagnostics/error_concentration.csv",
+    "redundancy/consolidated_high_correlation_pairs.csv",
+    "redundancy/feature_decisions_43_to_40.csv",
+    "iteration_selection/all_iteration_curves.csv",
+    "comparison/ablation_metrics.csv",
+    "comparison/ablation_deltas.csv",
+    "comparison/channel_class_recall.csv",
+    "comparison/ch5_unique_value.csv",
+    "conclusion.md",
+)

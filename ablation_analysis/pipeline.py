@@ -24,6 +24,7 @@ from .input_validation import validate_and_merge_inputs
 from .iteration_selection import make_record_folds, select_iterations
 from .modeling import train_selected_model
 from .redundancy import consolidate_pairs, redundancy_decisions
+from .reporting import REPORT_REQUIRED_FILES, generate_reports
 
 
 _JOIN_KEYS = ["record_id", "window_id", "start_sample", "end_sample"]
@@ -171,6 +172,15 @@ def _validate_staging(staging: Path) -> None:
     indices = list((staging / "fold_manifests").glob("*_indices.npz"))
     if len(manifests) != 6 or len(indices) != 6:
         raise RuntimeError("staging completeness failure: expected six fold manifests and six index bundles")
+    missing_reports = [relative for relative in REPORT_REQUIRED_FILES if not (staging / relative).is_file()]
+    if missing_reports:
+        raise RuntimeError(f"staging completeness failure: missing report files {missing_reports}")
+    iteration_plots = list((staging / "figures" / "iteration_curves").glob("*.png"))
+    recall_plots = list((staging / "figures" / "class_recall").glob("*.png"))
+    if len(iteration_plots) != 12 or len(recall_plots) < 4:
+        raise RuntimeError(
+            "staging completeness failure: expected 12 iteration plots and at least 4 class-recall plots"
+        )
 
 
 def run_pipeline(
@@ -233,15 +243,6 @@ def run_pipeline(
         write_acceptance(acceptance, staging / "feature_acceptance")
         build_run_matrix().to_csv(staging / "run_matrix.csv", index=False, encoding="utf-8-sig")
 
-        redundancy_dir = staging / "redundancy"
-        redundancy_dir.mkdir()
-        redundancy_decisions(FEATURE_43).to_csv(
-            redundancy_dir / "feature_decisions.csv", index=False, encoding="utf-8-sig"
-        )
-        consolidated.to_csv(redundancy_dir / "consolidated_high_correlation_pairs.csv", index=False, encoding="utf-8-sig")
-
-        diagnostics_dir = staging / "diagnostics"
-        diagnostics_dir.mkdir()
         folds_dir = staging / "fold_manifests"
         folds_dir.mkdir()
         models_dir = staging / "models"
@@ -259,10 +260,6 @@ def run_pipeline(
                     arrays[f"fold_{fold_number}_fit"] = fit_index
                     arrays[f"fold_{fold_number}_validation"] = validation_index
                 np.savez(folds_dir / f"{stem}_indices.npz", **arrays)
-
-                diagnostic_out = diagnostics_dir / stem
-                diagnostic_out.mkdir()
-                _write_diagnostics(diagnostic_inputs[(mode, channel)], diagnostic_out)
 
                 for feature_set, features in (("features_43", FEATURE_43), ("features_40", FEATURE_40)):
                     selection = select_iterations(
@@ -294,6 +291,12 @@ def run_pipeline(
         }
         (staging / "run_manifest.json").write_text(
             json.dumps(run_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        generate_reports(
+            staging,
+            diagnostic_inputs,
+            consolidated,
+            redundancy_decisions(FEATURE_43),
         )
         _validate_staging(staging)
         final_hashes = _hash_inputs(input_paths)

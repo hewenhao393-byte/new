@@ -196,6 +196,23 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
     assert run_manifest["cv_splits"] == 5
     assert run_manifest["input_sha256"]
     assert all(run_manifest["input_sha256"].values())
+    report_files = {
+        "diagnostics/four_group_feature_statistics.csv",
+        "diagnostics/record_level_cliffs_delta.csv",
+        "diagnostics/targeted_error_records.csv",
+        "diagnostics/error_concentration.csv",
+        "redundancy/consolidated_high_correlation_pairs.csv",
+        "redundancy/feature_decisions_43_to_40.csv",
+        "iteration_selection/all_iteration_curves.csv",
+        "comparison/ablation_metrics.csv",
+        "comparison/ablation_deltas.csv",
+        "comparison/channel_class_recall.csv",
+        "comparison/ch5_unique_value.csv",
+        "conclusion.md",
+    }
+    assert all((output / relative).is_file() for relative in report_files)
+    assert len(list((output / "figures" / "iteration_curves").glob("*.png"))) == 12
+    assert len(list((output / "figures" / "class_recall").glob("*.png"))) >= 4
     assert {path: path.read_bytes() for path in before} == before
 
     original_train = pipeline_module.train_selected_model
