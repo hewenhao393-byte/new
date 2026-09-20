@@ -256,3 +256,37 @@ def test_targeted_error_concentration_rejects_null_record_id():
 
     with pytest.raises(ValueError, match="null record_id"):
         targeted_error_concentration(frame)
+
+
+def test_targeted_error_concentration_validates_metadata_across_all_windows_of_error_record():
+    frame = pd.DataFrame(
+        {
+            "target_group": ["looseness_to_bearing", "correct_looseness"],
+            "record_id": ["r1", "r1"],
+            "motor": ["M2", "M3"],
+            "rpm": [740, 740],
+            "condition": ["c", "c"],
+            "state": ["s", "s"],
+            "severity": [1, 1],
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"conflicting metadata.*r1"):
+        targeted_error_concentration(frame)
+
+
+def test_targeted_error_concentration_rejects_both_error_directions_in_one_record():
+    frame = pd.DataFrame(
+        {
+            "target_group": ["looseness_to_bearing", "bearing_to_looseness"],
+            "record_id": ["r1", "r1"],
+            "motor": ["M2", "M2"],
+            "rpm": [740, 740],
+            "condition": ["c", "c"],
+            "state": ["s", "s"],
+            "severity": [1, 1],
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"multiple directional error groups.*r1"):
+        targeted_error_concentration(frame)

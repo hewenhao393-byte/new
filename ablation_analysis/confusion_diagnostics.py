@@ -163,18 +163,29 @@ def targeted_error_concentration(frame: pd.DataFrame):
     if errors["record_id"].isna().any():
         raise ValueError("null record_id is not allowed in targeted errors")
 
-    metadata_variants = errors.groupby("record_id", sort=False)[list(METADATA_COLUMNS)].nunique(dropna=False)
+    error_record_ids = errors["record_id"].unique()
+    complete_error_records = frame.loc[frame["record_id"].isin(error_record_ids)]
+    metadata_variants = complete_error_records.groupby("record_id", sort=False)[list(METADATA_COLUMNS)].nunique(dropna=False)
     conflicting_records = metadata_variants.index[metadata_variants.gt(1).any(axis=1)].tolist()
     if conflicting_records:
         raise ValueError(f"conflicting metadata for record_id: {conflicting_records}")
 
+    error_group_variants = errors.groupby("record_id", sort=False)["target_group"].nunique(dropna=False)
+    mixed_direction_records = error_group_variants.index[error_group_variants.gt(1)].tolist()
+    if mixed_direction_records:
+        raise ValueError(f"multiple directional error groups for record_id: {mixed_direction_records}")
+
     if errors.empty:
         per_record = pd.DataFrame(columns=["target_group", "record_id", *METADATA_COLUMNS, "error_windows"])
     else:
-        record_details = errors.groupby("record_id", sort=False)[["target_group", *METADATA_COLUMNS]].first().reset_index()
+        record_metadata = (
+            complete_error_records.groupby("record_id", sort=False)[list(METADATA_COLUMNS)].first().reset_index()
+        )
+        record_groups = errors.groupby("record_id", sort=False)["target_group"].first().reset_index()
         record_counts = errors.groupby("record_id", sort=False).size().rename("error_windows").reset_index()
         per_record = (
-            record_counts.merge(record_details, on="record_id", how="inner", validate="one_to_one")
+            record_counts.merge(record_groups, on="record_id", how="inner", validate="one_to_one")
+            .merge(record_metadata, on="record_id", how="inner", validate="one_to_one")
             [["target_group", "record_id", *METADATA_COLUMNS, "error_windows"]]
             .sort_values(["error_windows", "record_id"], ascending=[False, True], kind="stable")
             .reset_index(drop=True)
