@@ -7,7 +7,7 @@ import pytest
 from ablation_analysis.config import FEATURE_40, FEATURE_43
 from ablation_analysis.iteration_selection import make_record_folds
 from ablation_analysis.modeling import train_selected_model
-from ablation_analysis.pipeline import build_run_matrix, run_pipeline
+from ablation_analysis.pipeline import _validate_baseline_predictions, build_run_matrix, run_pipeline
 
 
 def test_build_run_matrix_has_exact_deterministic_twelve_runs():
@@ -70,6 +70,18 @@ def test_pipeline_refuses_existing_output_before_validation(tmp_path):
     assert list(output.iterdir()) == [marker]
 
 
+def test_baseline_prediction_contract_rejects_missing_or_unknown_predictions():
+    frame = pd.DataFrame({
+        "label": ["正常"],
+        **{label: [1.0 if label == "正常" else 0.0] for label in ["正常", "转子不平衡", "联轴器不对中", "松动", "轴承故障", "汽蚀"]},
+    })
+    with pytest.raises(ValueError, match="predicted_label"):
+        _validate_baseline_predictions(frame)
+    frame["predicted_label"] = "unknown"
+    with pytest.raises(ValueError, match="unknown predicted_label"):
+        _validate_baseline_predictions(frame)
+
+
 def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_path, monkeypatch):
     source = tmp_path / "features"
     baseline = tmp_path / "baseline"
@@ -112,6 +124,8 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
                     "severity", "start_sample", "end_sample", "split", "channel",
             ]].copy()
             predictions["predicted_label"] = predictions["label"]
+            for label in labels:
+                predictions[label] = predictions["label"].eq(label).astype(float)
             predictions.to_csv(prediction_dir / "window_predictions.csv", index=False)
 
     def accepted(_source):
@@ -183,3 +197,55 @@ def test_tiny_end_to_end_runs_all_paired_models_without_touching_sources(tmp_pat
     assert run_manifest["input_sha256"]
     assert all(run_manifest["input_sha256"].values())
     assert {path: path.read_bytes() for path in before} == before
+
+    original_train = pipeline_module.train_selected_model
+
+    def fail_late(*args, **kwargs):
+        raise RuntimeError("simulated late training failure")
+
+    monkeypatch.setattr(pipeline_module, "train_selected_model", fail_late)
+    failed_output = tmp_path / "failed-output"
+    with pytest.raises(RuntimeError, match="staging retained"):
+        run_pipeline(source, baseline, failed_output)
+    assert not failed_output.exists()
+    assert len(list(tmp_path.glob("failed-output.staging-*"))) == 1
+    with pytest.raises(RuntimeError, match="staging retained"):
+        run_pipeline(source, baseline, failed_output)
+    assert not failed_output.exists()
+    assert len(list(tmp_path.glob("failed-output.staging-*"))) == 2
+
+    monkeypatch.setattr(pipeline_module, "train_selected_model", original_train)
+    original_hash_inputs = pipeline_module._hash_inputs
+    hash_calls = 0
+
+    def changed_hash_snapshot(paths):
+        nonlocal hash_calls
+        hash_calls += 1
+        hashes = original_hash_inputs(paths)
+        if hash_calls == 3:
+            first = next(iter(hashes))
+            hashes[first] = "0" * 64
+        return hashes
+
+    monkeypatch.setattr(pipeline_module, "_hash_inputs", changed_hash_snapshot)
+    changed_output = tmp_path / "changed-output"
+    with pytest.raises(RuntimeError, match="input hash mismatch"):
+        run_pipeline(source, baseline, changed_output)
+    assert not changed_output.exists()
+    assert len(list(tmp_path.glob("changed-output.staging-*"))) == 1
+
+    monkeypatch.setattr(pipeline_module, "_hash_inputs", original_hash_inputs)
+    original_read_csv = pd.read_csv
+
+    def missing_prediction_column(path, *args, **kwargs):
+        frame = original_read_csv(path, *args, **kwargs)
+        if str(path).endswith("window_predictions.csv"):
+            return frame.drop(columns="predicted_label")
+        return frame
+
+    monkeypatch.setattr(pipeline_module.pd, "read_csv", missing_prediction_column)
+    invalid_output = tmp_path / "invalid-output"
+    with pytest.raises(ValueError, match="predicted_label"):
+        run_pipeline(source, baseline, invalid_output)
+    assert not invalid_output.exists()
+    assert not list(tmp_path.glob("invalid-output.staging-*"))
