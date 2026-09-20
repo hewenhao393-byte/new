@@ -134,24 +134,40 @@ def test_all_decisions_have_category_reason_and_review_note():
 def test_locally_correlated_families_are_explicitly_retained_for_instability():
     decisions = redundancy_decisions(FEATURE_43).set_index("feature")
     locally_correlated = [
-        "crest_factor",
         "impulse_factor",
         "clearance_factor",
         "shape_factor",
         "spectral_centroid",
-        "high_low_energy_ratio",
-        "env_kurtosis",
-        "env_crest_factor",
+        "wp_energy_ratio_0",
         "env_spectral_entropy",
         "env_peak_energy_ratio",
-        "env_peak_concentration",
-        "env_peak_count",
     ]
 
     assert decisions.loc[locally_correlated, "decision"].eq("retain").all()
-    assert decisions.loc[locally_correlated, "review_note"].str.contains(
-        "correlation not stable across all channels", regex=False
+    assert decisions.loc[locally_correlated, "review_note"].eq(
+        "retained because correlation is not stable across all channels"
     ).all()
+    assert decisions.loc["wp_energy_ratio_0", "review_note"] == (
+        "retained because correlation is not stable across all channels"
+    )
+
+
+@pytest.mark.parametrize(
+    "feature",
+    [
+        "crest_factor",
+        "high_low_energy_ratio",
+        "env_kurtosis",
+        "env_crest_factor",
+        "env_peak_concentration",
+        "env_peak_count",
+    ],
+)
+def test_unrelated_retained_features_receive_generic_nonlocal_note(feature):
+    decision = redundancy_decisions(FEATURE_43).set_index("feature").loc[feature]
+
+    assert decision["decision"] == "retain"
+    assert decision["review_note"] == "no globally stable redundancy removal selected"
 
 
 def test_redundancy_decisions_reject_non_contract_feature_sequence():

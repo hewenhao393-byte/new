@@ -121,18 +121,13 @@ _REMOVAL_REASONS = {
     "wp_energy_ratio_7": "reference component of eight-part closed composition",
 }
 _LOCALLY_CORRELATED = {
-    "crest_factor",
     "impulse_factor",
     "clearance_factor",
     "shape_factor",
     "spectral_centroid",
-    "high_low_energy_ratio",
-    "env_kurtosis",
-    "env_crest_factor",
+    "wp_energy_ratio_0",
     "env_spectral_entropy",
     "env_peak_energy_ratio",
-    "env_peak_concentration",
-    "env_peak_count",
 }
 
 
@@ -168,7 +163,7 @@ def redundancy_decisions(features) -> pd.DataFrame:
             review_note = "fixed ablation removal; retain the remaining component basis"
         elif feature in _LOCALLY_CORRELATED:
             reason = "retained as a physically distinct descriptor"
-            review_note = "retained because correlation not stable across all channels"
+            review_note = "retained because correlation is not stable across all channels"
         else:
             reason = "retained in the fixed 40-feature complement"
             review_note = "no globally stable redundancy removal selected"
