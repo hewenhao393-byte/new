@@ -319,11 +319,21 @@ def _validate_index_array(values, row_count: int, name: str) -> np.ndarray:
     return array.astype(np.int64, copy=False)
 
 
-def select_iterations(train, feature_names, folds, fold_indices=None, checkpoints=ITERATION_GRID):
+def select_iterations(
+    train,
+    feature_names,
+    folds,
+    fold_indices=None,
+    checkpoints=ITERATION_GRID,
+    max_iterations=None,
+):
     """Fit one max-iteration model per supplied training fold and select a stage."""
     feature_names = _validate_features(train, feature_names, "train")
     checkpoints = _validate_checkpoints(checkpoints)
-    if checkpoints[-1] > MAX_ITERATIONS:
+    maximum = MAX_ITERATIONS if max_iterations is None else int(max_iterations)
+    if maximum < 1:
+        raise ValueError("max_iterations must be positive")
+    if checkpoints[-1] > maximum:
         raise ValueError("checkpoint grid exceeds MAX_ITERATIONS")
     manifest, fold_indices, fold_hash = _normalize_folds(folds, fold_indices)
     required = list(dict.fromkeys(_FUSION_META + feature_names))
@@ -368,7 +378,7 @@ def select_iterations(train, feature_names, folds, fold_indices=None, checkpoint
         raise ValueError("fold indices must place every training row in validation exactly once")
 
     rows = []
-    params = {**MODEL_PARAMS, "iterations": MAX_ITERATIONS}
+    params = {**MODEL_PARAMS, "iterations": maximum}
     for fold, (fit_idx, validation_idx) in enumerate(fold_indices, start=1):
         fit_idx = _validate_index_array(fit_idx, len(train), f"fold {fold} fit")
         validation_idx = _validate_index_array(validation_idx, len(train), f"fold {fold} validation")
