@@ -337,8 +337,22 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
                         ["feature"], "redundancy feature decisions")
     passed("redundancy_content", "canonical_tables", "19 source rows; 43 decisions")
 
-    report_metrics, report_recalls, _, confusion_evidence = _load_model_artifacts(root)
+    report_metrics, report_recalls, report_curves, confusion_evidence = _load_model_artifacts(root)
     _assert_frame_close(report_metrics, metrics, ["channel", "split_mode", "feature_set"], "report model metrics")
+    _assert_frame_close(pd.read_csv(root / "iteration_selection" / "all_iteration_curves.csv"), report_curves,
+                        ["channel", "split_mode", "feature_set", "iteration"], "iteration curve table")
+    expected_matrix = pd.DataFrame([{"channel": channel, "split_mode": mode, "feature_set": feature_set}
+                                    for channel in (3, 4, 5) for mode in ("record", "temporal")
+                                    for feature_set in ("features_43", "features_40")])
+    _assert_frame_close(pd.read_csv(root / "run_matrix.csv"), expected_matrix,
+                        ["channel", "split_mode", "feature_set"], "run matrix")
+    result_table = pd.read_csv(root / "ablation_results.csv")
+    expected_results = metrics[["channel", "split_mode", "feature_set", "selected_iteration",
+                                "test_window_macro_f1", "test_record_macro_f1"]].rename(columns={
+                                    "test_window_macro_f1": "window_macro_f1", "test_record_macro_f1": "record_macro_f1"})
+    expected_results["fold_sha256"] = [fold_hashes[(row.split_mode, row.channel)] for row in expected_results.itertuples()]
+    expected_results = expected_results[result_table.columns]
+    _assert_frame_close(result_table, expected_results, ["channel", "split_mode", "feature_set"], "ablation results")
     recommendation = recommend_feature_set(deltas[_DELTA_REQUIRED])
     chosen_recalls = report_recalls[report_recalls.feature_set.eq(recommendation["recommended_feature_set"])]
     record_recalls = chosen_recalls[chosen_recalls.evaluation_level.eq("record")][["channel", "split_mode", "class", "recall"]]
@@ -357,6 +371,8 @@ def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
         raise ValueError("comparison new feature decision mismatch")
     if decision_row["recommended_feature_set"] != recommendation["recommended_feature_set"]:
         raise ValueError("comparison feature recommendation mismatch")
+    if json.loads(decision_row["failed_conditions_json"]) != new_features["failed_conditions"]:
+        raise ValueError("comparison new feature failed-conditions mismatch")
     conclusion = (root / "conclusion.md").read_text(encoding="utf-8")
     if recommendation["recommended_feature_set"] not in conclusion or any(
         f"CH{row.channel} / {row.split_mode}: {int(row.selected_iteration)} 轮" not in conclusion
