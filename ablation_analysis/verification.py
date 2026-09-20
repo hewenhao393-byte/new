@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -12,10 +13,18 @@ from catboost import CatBoostClassifier
 from PIL import Image
 
 from baseline_analysis.evaluation import evaluate_predictions, fuse_records
+from baseline_analysis.acceptance import accept_feature_tables
 
 from .config import FEATURE_40, FEATURE_43, JOIN_KEYS, LABEL_ORDER
-from .iteration_selection import _validate_manifest, aggregate_cv_scores
-from .reporting import REPORT_REQUIRED_FILES, _build_class_recall_deltas, _build_deltas
+from .input_validation import validate_and_merge_inputs
+from .iteration_selection import _validate_manifest, aggregate_cv_scores, choose_iteration
+from .confusion_diagnostics import assign_target_group, effect_size_table, grouped_feature_summary, targeted_error_concentration
+from .redundancy import consolidate_pairs, redundancy_decisions
+from .reporting import (
+    REPORT_REQUIRED_FILES, _DELTA_REQUIRED, _aggregate_diagnostics, _build_class_recall_deltas,
+    _build_deltas, _load_model_artifacts, assess_ch5_unique_value, recommend_feature_set,
+    recommend_new_features,
+)
 
 
 MODEL_FILES = {
@@ -24,6 +33,36 @@ MODEL_FILES = {
     "record_predictions.csv", "window_metrics.json", "record_metrics.json",
     "feature_importance.csv",
 }
+
+
+def _diagnostics(merged):
+    frame = merged.copy()
+    frame["target_group"] = assign_target_group(frame["label"], frame["predicted_label"])
+    grouped = grouped_feature_summary(frame, FEATURE_43)
+    required = {"correct_looseness", "looseness_to_bearing", "correct_bearing", "bearing_to_looseness"}
+    effects = effect_size_table(frame, FEATURE_43) if required.issubset(set(frame.target_group.dropna())) else pd.DataFrame(
+        columns=["feature", "group_a", "group_b", "n_records_a", "n_records_b", "delta", "abs_delta", "magnitude", "small_sample"]
+    )
+    per_record, summary = targeted_error_concentration(frame)
+    return grouped, effects, per_record, summary
+
+
+def _validate_temporal_rows(data: pd.DataFrame, bounds: pd.DataFrame) -> None:
+    for record_id, rows in data.groupby("record_id", sort=False):
+        bound = bounds.loc[record_id]
+        if int(bound.guard_end - bound.guard_start) != 12000:
+            raise ValueError(f"temporal guard length invalid for {record_id}")
+        if ((rows.start_sample < bound.guard_end) & (rows.end_sample > bound.guard_start)).any():
+            raise ValueError(f"temporal window intersects guard for {record_id}")
+        train_rows, test_rows = rows[rows.split.eq("train")], rows[rows.split.eq("test")]
+        if not ((train_rows.start_sample >= bound.train_start) & (train_rows.end_sample <= bound.train_end)).all():
+            raise ValueError(f"temporal train window outside declared range for {record_id}")
+        if not ((test_rows.start_sample >= bound.test_start) & (test_rows.end_sample <= bound.test_end)).all():
+            raise ValueError(f"temporal test window outside declared range for {record_id}")
+        relative_start = train_rows.start_sample - bound.train_start
+        relative_end = train_rows.end_sample - 1 - bound.train_start
+        if not (relative_start // 19200 == relative_end // 19200).all():
+            raise ValueError(f"temporal train window crosses block boundary for {record_id}")
 
 
 def _sha256(path: Path) -> str:
@@ -65,11 +104,11 @@ def _assert_frame_close(actual: pd.DataFrame, expected: pd.DataFrame, keys, name
         if pd.api.types.is_numeric_dtype(right[column]):
             if not np.allclose(left[column].to_numpy(float), right[column].to_numpy(float), atol=1e-12, rtol=0, equal_nan=True):
                 raise ValueError(f"comparison mismatch in {name}.{column}")
-        elif not left[column].fillna("<NA>").equals(right[column].fillna("<NA>")):
+        elif not left[column].fillna("").astype(str).equals(right[column].fillna("").astype(str)):
             raise ValueError(f"comparison mismatch in {name}.{column}")
 
 
-def verify_output(output_root) -> pd.DataFrame:
+def verify_output(output_root, *, _accepted=None) -> pd.DataFrame:
     """Verify every persisted result against inputs and independently write an audit report."""
     root = Path(output_root)
     checks = []
@@ -82,6 +121,9 @@ def verify_output(output_root) -> pd.DataFrame:
     manifest_path = root / "run_manifest.json"
     if not manifest_path.is_file():
         raise ValueError("report run_manifest.json missing")
+    missing_reports = [relative for relative in REPORT_REQUIRED_FILES if not (root / relative).is_file()]
+    if missing_reports:
+        raise ValueError(f"report files missing: {missing_reports}")
     manifest = _json(manifest_path)
     source = Path(manifest["feature_source_root"])
     baseline = Path(manifest["baseline_root"])
@@ -96,6 +138,13 @@ def verify_output(output_root) -> pd.DataFrame:
             raise ValueError(f"input hash mismatch: {path}")
         passed("input_hash", str(path), expected_hash)
 
+    acceptance, accepted_tables = accept_feature_tables(source) if _accepted is None else _accepted
+    persisted_acceptance = pd.read_csv(root / "feature_acceptance" / "acceptance_checks.csv")
+    _assert_frame_close(persisted_acceptance, acceptance, ["check"], "acceptance report")
+    if not acceptance["passed"].all():
+        raise ValueError("acceptance report contains failed checks")
+    passed("acceptance", "six_source_tables", f"{len(acceptance)} checks passed")
+
     run_dirs = sorted((root / "models").glob("*/ch*/features_*"))
     model_files = sorted((root / "models").glob("*/ch*/features_*/model.cbm"))
     if len(run_dirs) != 12 or len(model_files) != 12:
@@ -109,9 +158,14 @@ def verify_output(output_root) -> pd.DataFrame:
 
     source_tables = {}
     fold_hashes = {}
+    diagnostic_inputs = {}
+    temporal_path = source / "temporal_split" / "temporal_split.csv"
+    if not temporal_path.is_file() and _accepted is None:
+        raise ValueError("temporal split bounds are missing")
+    temporal_bounds = pd.read_csv(temporal_path).set_index("record_id") if temporal_path.is_file() else None
     for mode, folder, training_split in (("record", "file_split", "train_dev"), ("temporal", "temporal_split", "train")):
         for channel in (3, 4, 5):
-            data = pd.read_csv(source / folder / f"features_ch{channel}.csv", low_memory=False)
+            data = accepted_tables[mode][channel]
             source_tables[(mode, channel)] = data
             train = data[data.split.eq(training_split)].reset_index(drop=True)
             test = data[data.split.eq("test")].reset_index(drop=True)
@@ -130,6 +184,8 @@ def verify_output(output_root) -> pd.DataFrame:
             test_windows = set(map(tuple, test[JOIN_KEYS].itertuples(index=False, name=None)))
             if train_windows & test_windows:
                 raise ValueError(f"test window entered CV source rows for {mode} ch{channel}")
+            if mode == "temporal" and temporal_bounds is not None:
+                _validate_temporal_rows(data, temporal_bounds)
             bundle = np.load(index_path)
             folds = sorted(fold.fold.unique())
             if set(bundle.files) != {f"fold_{number}_{role}" for number in folds for role in ("fit", "validation")}:
@@ -157,6 +213,7 @@ def verify_output(output_root) -> pd.DataFrame:
             prediction_keys = set(map(tuple, baseline_predictions[JOIN_KEYS].itertuples(index=False, name=None)))
             if source_keys != prediction_keys or len(test) != len(baseline_predictions):
                 raise ValueError(f"diagnostic join unmatched rows for {mode} ch{channel}")
+            diagnostic_inputs[(mode, channel)] = _diagnostics(validate_and_merge_inputs(data, baseline_predictions))
             passed("diagnostic_join", f"{mode}_ch{channel}", "unmatched=0")
 
     metric_rows, recall_rows = [], []
@@ -180,6 +237,9 @@ def verify_output(output_root) -> pd.DataFrame:
             raise ValueError(f"iteration curve does not cover production grid for {run}")
         recomputed_summary = aggregate_cv_scores(scores)
         _assert_frame_close(summary, recomputed_summary, ["iteration"], f"iteration summary {run}")
+        chosen = choose_iteration(summary, checkpoints=grid, expected_folds=int(manifest["cv_splits"]))
+        if selected != chosen:
+            raise ValueError(f"chosen iteration mismatch for {run}: metadata={selected}, recomputed={chosen}")
 
         data = source_tables[(mode, channel)]
         test = data[data.split.eq("test")].reset_index(drop=True)
@@ -256,9 +316,55 @@ def verify_output(output_root) -> pd.DataFrame:
                         ["channel", "split_mode", "evaluation_level", "class"], "comparison recall deltas")
     passed("coverage", "class_recall_deltas", "72 exact rows")
 
-    missing_reports = [relative for relative in REPORT_REQUIRED_FILES if not (root / relative).is_file()]
-    if missing_reports:
-        raise ValueError(f"report files missing: {missing_reports}")
+    grouped, effects, errors, concentration = _aggregate_diagnostics(diagnostic_inputs)
+    for relative, expected, keys in (
+        ("diagnostics/four_group_feature_statistics.csv", grouped, ["channel", "split_mode", "target_group", "feature"]),
+        ("diagnostics/record_level_cliffs_delta.csv", effects, ["channel", "split_mode", "feature", "group_a", "group_b"]),
+        ("diagnostics/targeted_error_records.csv", errors, ["channel", "split_mode", "record_id"]),
+        ("diagnostics/error_concentration.csv", concentration, ["channel", "split_mode"]),
+    ):
+        _assert_frame_close(pd.read_csv(root / relative), expected, keys, f"diagnostic {relative}")
+        passed("diagnostic_content", relative, f"rows={len(expected)}")
+
+    correlation_rows = pd.read_csv(baseline / "correlations" / "pearson_high_correlation_pairs.csv")
+    if len(correlation_rows) != 19:
+        raise ValueError("correlation source must contain exactly 19 canonical rows")
+    consolidated = consolidate_pairs(correlation_rows)
+    _assert_frame_close(pd.read_csv(root / "redundancy" / "consolidated_high_correlation_pairs.csv"), consolidated,
+                        ["feature_a", "feature_b"], "redundancy consolidated correlations")
+    decisions = redundancy_decisions(FEATURE_43)
+    _assert_frame_close(pd.read_csv(root / "redundancy" / "feature_decisions_43_to_40.csv"), decisions,
+                        ["feature"], "redundancy feature decisions")
+    passed("redundancy_content", "canonical_tables", "19 source rows; 43 decisions")
+
+    report_metrics, report_recalls, _, confusion_evidence = _load_model_artifacts(root)
+    _assert_frame_close(report_metrics, metrics, ["channel", "split_mode", "feature_set"], "report model metrics")
+    recommendation = recommend_feature_set(deltas[_DELTA_REQUIRED])
+    chosen_recalls = report_recalls[report_recalls.feature_set.eq(recommendation["recommended_feature_set"])]
+    record_recalls = chosen_recalls[chosen_recalls.evaluation_level.eq("record")][["channel", "split_mode", "class", "recall"]]
+    unique = assess_ch5_unique_value(record_recalls)
+    _assert_frame_close(pd.read_csv(root / "comparison" / "ch5_unique_value.csv"), unique["table"],
+                        ["class"], "comparison CH5 decision")
+    chosen_confusion = confusion_evidence[confusion_evidence.feature_set.eq(recommendation["recommended_feature_set"])].drop(columns="feature_set")
+    new_features = recommend_new_features(chosen_confusion, effects)
+    expected_evidence = new_features["confusion_evidence"].copy(); expected_evidence["evidence_type"] = "confusion"
+    effect_evidence = new_features["effect_evidence"].copy(); effect_evidence["evidence_type"] = "effect_size"
+    expected_evidence = pd.concat([expected_evidence, effect_evidence], ignore_index=True, sort=False)
+    _assert_frame_close(pd.read_csv(root / "comparison" / "new_feature_evidence.csv"), expected_evidence,
+                        ["evidence_type", "channel", "split_mode"], "comparison new feature evidence")
+    decision_row = pd.read_csv(root / "comparison" / "new_feature_decision.csv").iloc[0]
+    if bool(decision_row["recommend_new_features"]) != bool(new_features["recommend_new_features"]):
+        raise ValueError("comparison new feature decision mismatch")
+    if decision_row["recommended_feature_set"] != recommendation["recommended_feature_set"]:
+        raise ValueError("comparison feature recommendation mismatch")
+    conclusion = (root / "conclusion.md").read_text(encoding="utf-8")
+    if recommendation["recommended_feature_set"] not in conclusion or any(
+        f"CH{row.channel} / {row.split_mode}: {int(row.selected_iteration)} 轮" not in conclusion
+        for row in metrics[metrics.feature_set.eq(recommendation["recommended_feature_set"])].itertuples()
+    ):
+        raise ValueError("report conclusion does not contain dynamic decisions and selected iterations")
+    passed("decision_content", "recommendations_and_conclusion", recommendation["recommended_feature_set"])
+
     passed("report", "required_files", str(len(REPORT_REQUIRED_FILES)))
     iteration_pngs = sorted((root / "figures" / "iteration_curves").glob("*.png"))
     recall_pngs = sorted((root / "figures" / "class_recall").glob("*.png"))
@@ -276,12 +382,18 @@ def verify_output(output_root) -> pd.DataFrame:
         passed("figure", str(path.relative_to(root)), f"bytes={path.stat().st_size}")
 
     report = pd.DataFrame(checks, columns=["category", "item", "passed", "detail"])
-    report.to_csv(root / "verification_report.csv", index=False, encoding="utf-8-sig")
+    report_path = root / "verification_report.csv"
+    report_temp = root / f".verification_report-{uuid4().hex}.csv"
+    report.to_csv(report_temp, index=False, encoding="utf-8-sig")
+    report_temp.replace(report_path)
     summary = (
         "# 独立验证摘要\n\n"
         f"- 结论：**PASS**\n- 通过检查：{len(report)}\n- 模型运行：12\n"
         f"- 逐类 Recall 差值：72 行\n- 模型重载概率容差：1e-12\n"
         "- 诊断键连接：6 组均 unmatched=0\n"
     )
-    (root / "verification_summary.md").write_text(summary, encoding="utf-8")
+    summary_path = root / "verification_summary.md"
+    summary_temp = root / f".verification_summary-{uuid4().hex}.md"
+    summary_temp.write_text(summary, encoding="utf-8")
+    summary_temp.replace(summary_path)
     return report

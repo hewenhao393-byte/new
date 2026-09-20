@@ -6,7 +6,20 @@ import pytest
 
 from ablation_analysis.config import FEATURE_43
 from ablation_analysis.pipeline import run_pipeline
-from ablation_analysis.verification import verify_output
+from ablation_analysis.verification import _validate_temporal_rows, verify_output
+
+
+@pytest.mark.parametrize("kind,match", [("guard", "guard"), ("block", "block boundary"), ("overlap", "declared range")])
+def test_temporal_protocol_rejects_guard_block_and_overlapping_nonidentical_windows(kind, match):
+    bounds = pd.DataFrame([{"record_id": "r", "train_start": 20000, "train_end": 58400,
+                            "guard_start": 8000, "guard_end": 20000, "test_start": 0, "test_end": 8000}]).set_index("record_id")
+    rows = pd.DataFrame([{"record_id": "r", "split": "train", "start_sample": 20000, "end_sample": 24800},
+                         {"record_id": "r", "split": "test", "start_sample": 0, "end_sample": 4800}])
+    if kind == "guard": rows.loc[1, ["start_sample", "end_sample"]] = [7000, 11800]
+    elif kind == "block": rows.loc[0, ["start_sample", "end_sample"]] = [37000, 41800]
+    else: rows.loc[1, ["start_sample", "end_sample"]] = [21000, 23000]
+    with pytest.raises(ValueError, match=match):
+        _validate_temporal_rows(rows, bounds)
 
 
 def _build_fixture(tmp_path, monkeypatch):
@@ -23,11 +36,12 @@ def _build_fixture(tmp_path, monkeypatch):
                     record_id = f"{mode}-{class_index}-{record_index}"
                     if mode == "temporal" and split == "test":
                         record_id = f"{mode}-{class_index}-0"
+                    start_sample = record_index * 10 if mode == "record" else (20000 + record_index * 10 if split == "train" else 0)
                     rows.append({
                         "record_id": record_id, "window_id": record_index,
                         "label": label, "motor": "M", "rpm": 1000, "condition": "c",
-                        "state": "s", "severity": "none", "start_sample": record_index * 10,
-                        "end_sample": record_index * 10 + 10, "split": split, "channel": channel,
+                        "state": "s", "severity": "none", "start_sample": start_sample,
+                        "end_sample": start_sample + 10, "split": split, "channel": channel,
                         **{name: class_index * 10 + record_index + channel / 10 + i / 1000
                            for i, name in enumerate(FEATURE_43)},
                     })
@@ -44,6 +58,11 @@ def _build_fixture(tmp_path, monkeypatch):
             for label_name in labels:
                 predictions[label_name] = predictions["label"].eq(label_name).astype(float)
             predictions.to_csv(prediction_dir / "window_predictions.csv", index=False)
+    temporal_records = sorted(tables["temporal"][3].record_id.unique())
+    pd.DataFrame([{"record_id": record_id, "train_start": 20000, "train_end": 39200,
+                   "guard_start": 8000, "guard_end": 20000, "test_start": 0, "test_end": 8000,
+                   "split_direction": "test_head"} for record_id in temporal_records]).to_csv(
+        source / "temporal_split" / "temporal_split.csv", index=False)
     correlation_dir = baseline / "correlations"
     correlation_dir.mkdir(parents=True)
     pd.DataFrame([{
@@ -53,9 +72,12 @@ def _build_fixture(tmp_path, monkeypatch):
 
     import ablation_analysis.config as config
     import ablation_analysis.pipeline as pipeline
-    monkeypatch.setattr(pipeline, "accept_feature_tables", lambda _: (
+    import ablation_analysis.verification as verification
+    accepted = lambda _: (
         pd.DataFrame([{"check": "fixture", "measured": 0, "threshold": 0, "passed": True, "detail": ""}]), tables
-    ))
+    )
+    monkeypatch.setattr(pipeline, "accept_feature_tables", accepted)
+    monkeypatch.setattr(verification, "accept_feature_tables", accepted)
     monkeypatch.setattr(pipeline, "ITERATION_GRID", [2, 4])
     monkeypatch.setattr(pipeline, "MAX_ITERATIONS", 4)
     monkeypatch.setattr(config, "ITERATION_GRID", [2, 4])
@@ -76,12 +98,15 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
 @pytest.mark.parametrize("mutation,match", [
     ("missing_model", "model"),
     ("non_grid_iteration", "iteration"),
+    ("wrong_valid_iteration", "chosen iteration"),
     ("fold_overlap", "fold"),
     ("fold_hash", "fold"),
     ("invalid_probability", "probability"),
+    ("invalid_record_probability", "record predictions"),
     ("changed_comparison", "comparison"),
     ("missing_report", "report"),
     ("missing_diagnostic", "report"),
+    ("changed_diagnostic", "diagnostic"),
 ])
 def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, match):
     output = _build_fixture(tmp_path, monkeypatch)
@@ -89,8 +114,14 @@ def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, mat
     if mutation == "missing_model":
         (run / "model.cbm").rename(run / "model.cbm.hidden")
     elif mutation == "non_grid_iteration":
-        path = run / "metadata.json"; value = json.loads(path.read_text()); value["selected_iteration"] = 3
+        path = run / "metadata.json"; value = json.loads(path.read_text()); value["selected_iteration"] = 810
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    elif mutation == "wrong_valid_iteration":
+        path = run / "metadata.json"; value = json.loads(path.read_text()); value["selected_iteration"] = 2 if value["selected_iteration"] == 4 else 4
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        comparison = output / "comparison" / "ablation_metrics.csv"; frame = pd.read_csv(comparison)
+        mask = frame.split_mode.eq("record") & frame.channel.eq(3) & frame.feature_set.eq("features_40")
+        frame.loc[mask, "selected_iteration"] = value["selected_iteration"]; frame.to_csv(comparison, index=False)
     elif mutation == "fold_overlap":
         path = output / "fold_manifests" / "record_ch3.csv"; frame = pd.read_csv(path)
         frame.loc[(frame.fold == 1) & (frame.role == "validation"), "role"] = "fit"
@@ -105,10 +136,16 @@ def test_verifier_rejects_corrupted_outputs(tmp_path, monkeypatch, mutation, mat
     elif mutation == "changed_comparison":
         path = output / "comparison" / "ablation_metrics.csv"; frame = pd.read_csv(path)
         frame.loc[0, "test_record_macro_f1"] += .01; frame.to_csv(path, index=False)
+    elif mutation == "invalid_record_probability":
+        path = run / "record_predictions.csv"; frame = pd.read_csv(path)
+        frame.loc[0, "正常"] += .2; frame.to_csv(path, index=False)
     elif mutation == "missing_report":
         path = output / "conclusion.md"; path.rename(output / "conclusion.md.hidden")
     else:
         path = output / "diagnostics" / "error_concentration.csv"
-        path.rename(path.with_suffix(".csv.hidden"))
+        if mutation == "missing_diagnostic":
+            path.rename(path.with_suffix(".csv.hidden"))
+        else:
+            frame = pd.read_csv(path); frame.loc[0, "top5_share"] += .1; frame.to_csv(path, index=False)
     with pytest.raises(ValueError, match=match):
         verify_output(output)
