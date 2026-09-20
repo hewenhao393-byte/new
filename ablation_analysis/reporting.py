@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Mapping
 
@@ -12,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.font_manager import FontProperties
+from matplotlib.font_manager import FontProperties, findfont
 
 from .config import LABEL_ORDER
 
@@ -217,6 +218,26 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _resolve_chinese_font():
+    requested = CHINESE_FONT
+    if requested.is_file():
+        resolved = requested
+        fallback = False
+    else:
+        resolved = Path(findfont("DejaVu Sans", fallback_to_default=True))
+        fallback = True
+        warnings.warn(
+            f"Chinese font not found at {requested}; falling back to {resolved}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return FontProperties(fname=str(resolved)), {
+        "requested_path": str(requested),
+        "resolved_path": str(resolved),
+        "fallback_used": fallback,
+    }
+
+
 def _directional_from_confusion(confusion, channel, split, scope, feature_set) -> dict:
     matrix = np.asarray(confusion, dtype=float)
     if matrix.shape != (len(LABEL_ORDER), len(LABEL_ORDER)) or not np.isfinite(matrix).all() or (matrix < 0).any():
@@ -242,6 +263,47 @@ def _directional_from_confusion(confusion, channel, split, scope, feature_set) -
         "channel": channel, "split_mode": split, "scope": scope, "feature_set": feature_set,
         **values(looseness, bearing, "looseness", "looseness_to_bearing"),
         **values(bearing, looseness, "bearing", "bearing_to_looseness"),
+    }
+
+
+def _aggregate_selected_cv_confusion(selected_folds, channel, split, feature_set) -> dict:
+    """Aggregate complete OOF pair counts, then find the largest competing pair."""
+    offdiag = [
+        f"confusion_true_{actual}_pred_{predicted}_count"
+        for actual in range(len(LABEL_ORDER))
+        for predicted in range(len(LABEL_ORDER))
+        if actual != predicted
+    ]
+    required = {"looseness_actual_count", "bearing_actual_count", *offdiag}
+    missing = sorted(required - set(selected_folds.columns))
+    if missing or selected_folds.empty:
+        raise ValueError(f"selected CV complete confusion evidence missing columns: {missing}")
+    values = selected_folds[list(required)].to_numpy(dtype=float)
+    if not np.isfinite(values).all() or (values < 0).any():
+        raise ValueError("selected CV confusion counts must be finite and nonnegative")
+    totals = selected_folds[offdiag].sum()
+    looseness = LABEL_ORDER.index("松动")
+    bearing = LABEL_ORDER.index("轴承故障")
+
+    def direction(actual, target, actual_name, direction_name):
+        target_count = float(totals[f"confusion_true_{actual}_pred_{target}_count"])
+        competitors = [
+            float(totals[f"confusion_true_{actual}_pred_{predicted}_count"])
+            for predicted in range(len(LABEL_ORDER))
+            if predicted not in {actual, target}
+        ]
+        actual_count = float(selected_folds[f"{actual_name}_actual_count"].sum())
+        return {
+            f"{actual_name}_actual_count": actual_count,
+            f"{direction_name}_count": target_count,
+            f"{direction_name}_rate": target_count / actual_count if actual_count else 0.0,
+            f"{actual_name}_other_max_offdiag_count": max(competitors, default=0.0),
+        }
+
+    return {
+        "channel": channel, "split_mode": split, "scope": "train_internal_cv", "feature_set": feature_set,
+        **direction(looseness, bearing, "looseness", "looseness_to_bearing"),
+        **direction(bearing, looseness, "bearing", "bearing_to_looseness"),
     }
 
 
@@ -300,26 +362,9 @@ def _load_model_artifacts(staging: Path):
                         )
                 fold_scores = pd.read_csv(run / "internal_cv_fold_scores.csv")
                 selected_folds = fold_scores[fold_scores["iteration"].eq(selected)]
-                directional = [
-                    "looseness_actual_count", "looseness_to_bearing_count", "looseness_other_max_offdiag_count",
-                    "bearing_actual_count", "bearing_to_looseness_count", "bearing_other_max_offdiag_count",
-                ]
-                if len(selected_folds) == 0 or not set(directional).issubset(selected_folds.columns):
-                    raise ValueError(f"selected CV directional confusion evidence missing in {run}")
-                summed = selected_folds[directional].sum()
-                cv_row = {
-                    "channel": channel, "split_mode": split, "scope": "train_internal_cv", "feature_set": feature_set,
-                    **{column: float(summed[column]) for column in directional},
-                }
-                cv_row["looseness_to_bearing_rate"] = (
-                    cv_row["looseness_to_bearing_count"] / cv_row["looseness_actual_count"]
-                    if cv_row["looseness_actual_count"] else 0.0
+                confusion_rows.append(
+                    _aggregate_selected_cv_confusion(selected_folds, channel, split, feature_set)
                 )
-                cv_row["bearing_to_looseness_rate"] = (
-                    cv_row["bearing_to_looseness_count"] / cv_row["bearing_actual_count"]
-                    if cv_row["bearing_actual_count"] else 0.0
-                )
-                confusion_rows.append(cv_row)
                 confusion_rows.append(_directional_from_confusion(
                     window["confusion_matrix"], channel, split, "test_window", feature_set
                 ))
@@ -397,8 +442,7 @@ def _aggregate_diagnostics(diagnostic_tables: Mapping):
     )
 
 
-def _plot_iteration_curves(curves: pd.DataFrame, output: Path) -> None:
-    font = FontProperties(fname=str(CHINESE_FONT))
+def _plot_iteration_curves(curves: pd.DataFrame, output: Path, font: FontProperties) -> None:
     output.mkdir(parents=True, exist_ok=True)
     for (channel, split, feature_set), frame in curves.groupby(["channel", "split_mode", "feature_set"], sort=True):
         fig, ax = plt.subplots(figsize=(8, 5), dpi=120)
@@ -412,8 +456,7 @@ def _plot_iteration_curves(curves: pd.DataFrame, output: Path) -> None:
         plt.close(fig)
 
 
-def _plot_class_recalls(recalls: pd.DataFrame, output: Path) -> None:
-    font = FontProperties(fname=str(CHINESE_FONT))
+def _plot_class_recalls(recalls: pd.DataFrame, output: Path, font: FontProperties) -> None:
     output.mkdir(parents=True, exist_ok=True)
     for split in SPLIT_MODES:
         for level in LEVELS:
@@ -516,7 +559,7 @@ CH5 只在 record 和 temporal 两种划分上都严格高于 CH3、CH4 时，�
 
 ## 松动/轴承故障效应量、集中度与是否需要新特征
 
-定向 Cliff's delta 中可忽略或小效应的比例为 {weak_share:.1%}；六组定向错分的前5个record平均集中度为 {top5_mean:.1%}。
+定向 Cliff's delta 中可忽略效应的比例为 {weak_share:.1%}；六组定向错分的前5个record平均集中度为 {top5_mean:.1%}。
 保守规则要求：在 CH3/CH4/CH5 与 record/temporal 六组中，松动→轴承故障与轴承故障→松动都必须至少出现一次，且其计数不低于该真实类别流向任一其他错误类别的最大计数；该条件必须同时出现在训练内部 CV 选定轮数、独立测试窗口级和独立测试 record 级。同时，两个定向比较在每组均必须具备 43 特征完整、非小样本覆盖，且严格多数 `|Cliff's delta| < 0.147`。{new_feature_text}
 机器可读决策与逐组证据见 `comparison/new_feature_decision.csv` 和 `comparison/new_feature_evidence.csv`。
 
@@ -589,8 +632,14 @@ def generate_reports(
         "confusion_evidence_json": new_feature_decision["confusion_evidence"].to_json(orient="records", force_ascii=False),
         "effect_evidence_json": new_feature_decision["effect_evidence"].to_json(orient="records", force_ascii=False),
     }]).to_csv(comparison_dir / "new_feature_decision.csv", index=False, encoding="utf-8-sig")
-    _plot_iteration_curves(curves, staging / "figures" / "iteration_curves")
-    _plot_class_recalls(recalls, staging / "figures" / "class_recall")
+    font, font_metadata = _resolve_chinese_font()
+    figures_dir = staging / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    (figures_dir / "font_metadata.json").write_text(
+        json.dumps(font_metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _plot_iteration_curves(curves, figures_dir / "iteration_curves", font)
+    _plot_class_recalls(recalls, figures_dir / "class_recall", font)
     _write_conclusion(
         staging / "conclusion.md", metrics, deltas, chosen_recalls, unique, decision, effects, concentration,
         new_feature_decision,
@@ -613,5 +662,6 @@ REPORT_REQUIRED_FILES = (
     "comparison/ch5_unique_value.csv",
     "comparison/new_feature_decision.csv",
     "comparison/new_feature_evidence.csv",
+    "figures/font_metadata.json",
     "conclusion.md",
 )

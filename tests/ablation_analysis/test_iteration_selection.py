@@ -168,6 +168,8 @@ def test_staged_record_scores_calls_stream_once_and_preserves_feature_order():
         "bearing_to_looseness_count", "bearing_to_looseness_rate",
         "looseness_other_max_offdiag_count", "bearing_other_max_offdiag_count",
     }.issubset(scores.columns)
+    offdiag = [column for column in scores if column.startswith("confusion_true_")]
+    assert len(offdiag) == 30
 
 
 def test_staged_record_scores_emits_directional_confusion_from_same_stream():
@@ -192,6 +194,8 @@ def test_staged_record_scores_emits_directional_confusion_from_same_stream():
     assert scores.loc[0, "bearing_to_looseness_rate"] == pytest.approx(1.0)
     assert scores.loc[0, "looseness_other_max_offdiag_count"] == 0
     assert scores.loc[0, "bearing_other_max_offdiag_count"] == 0
+    assert scores.loc[0, "confusion_true_3_pred_4_count"] == 1
+    assert scores.loc[0, "confusion_true_4_pred_3_count"] == 1
 
 
 def test_staged_record_scores_rejects_incomplete_stream():
@@ -317,7 +321,7 @@ def test_select_iterations_runs_one_real_catboost_model_per_reusable_fold(monkey
     assert len(models) == 5
     assert all(params["iterations"] == 2 for params in models)
     assert result["fold_hash"] == folds[2]
-    assert result["fold_scores"].shape == (10, 11)
+    assert result["fold_scores"].shape == (10, 41)
     assert result["summary"]["fold_count"].tolist() == [5, 5]
     assert result["selected_iteration"] in [1, 2]
 

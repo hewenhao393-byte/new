@@ -29,6 +29,12 @@ _DIRECTIONAL_COLUMNS = [
     "bearing_to_looseness_rate",
     "bearing_other_max_offdiag_count",
 ]
+_OFFDIAGONAL_COLUMNS = [
+    f"confusion_true_{actual}_pred_{predicted}_count"
+    for actual in range(len(LABEL_ORDER))
+    for predicted in range(len(LABEL_ORDER))
+    if actual != predicted
+]
 _FORBIDDEN_FEATURES = set(
     _FUSION_META
     + [
@@ -236,6 +242,12 @@ def staged_record_scores(model, validation, feature_names, checkpoints, classes)
                 "record_macro_f1": metrics["macro_f1"],
                 **directional(looseness, bearing, "looseness", "looseness_to_bearing"),
                 **directional(bearing, looseness, "bearing", "bearing_to_looseness"),
+                **{
+                    f"confusion_true_{actual}_pred_{predicted}_count": int(confusion[actual, predicted])
+                    for actual in range(len(LABEL_ORDER))
+                    for predicted in range(len(LABEL_ORDER))
+                    if actual != predicted
+                },
             }
         )
         if iteration >= checkpoints[-1]:
@@ -244,7 +256,9 @@ def staged_record_scores(model, validation, feature_names, checkpoints, classes)
         raise ValueError(
             f"incomplete checkpoint stream: required through {checkpoints[-1]}, received through {seen_last}"
         )
-    return pd.DataFrame(rows, columns=["iteration", "record_macro_f1", *_DIRECTIONAL_COLUMNS])
+    return pd.DataFrame(
+        rows, columns=["iteration", "record_macro_f1", *_DIRECTIONAL_COLUMNS, *_OFFDIAGONAL_COLUMNS]
+    )
 
 
 def aggregate_cv_scores(fold_scores: pd.DataFrame) -> pd.DataFrame:

@@ -8,6 +8,8 @@ from PIL import Image
 
 from ablation_analysis.config import LABEL_ORDER
 from ablation_analysis.reporting import (
+    _aggregate_selected_cv_confusion,
+    _resolve_chinese_font,
     assess_ch5_unique_value,
     generate_reports,
     recommend_feature_set,
@@ -154,6 +156,37 @@ def test_new_features_reject_small_sample_or_nonmajority_weak_effects():
     ] is False
 
 
+def test_cv_confusion_aggregates_each_pair_before_taking_competing_max():
+    rows = []
+    for fold in (1, 2):
+        row = {"fold": fold, "iteration": 40, "looseness_actual_count": 20, "bearing_actual_count": 20}
+        for actual in range(6):
+            for predicted in range(6):
+                if actual != predicted:
+                    row[f"confusion_true_{actual}_pred_{predicted}_count"] = 0
+        rows.append(row)
+    # For true looseness (index 3), different competitors dominate the two folds.
+    rows[0]["confusion_true_3_pred_0_count"] = 6
+    rows[1]["confusion_true_3_pred_1_count"] = 6
+    rows[0]["confusion_true_3_pred_4_count"] = 7
+    rows[1]["confusion_true_3_pred_4_count"] = 0
+    # sum(fold maxima)=12, but max(sum each competing pair)=6; target total=7 is principal.
+    evidence = _aggregate_selected_cv_confusion(pd.DataFrame(rows), 3, "record", "features_40")
+    assert evidence["looseness_to_bearing_count"] == 7
+    assert evidence["looseness_other_max_offdiag_count"] == 6
+
+
+def test_chinese_font_fallback_warns_and_reports_metadata(monkeypatch, tmp_path):
+    import ablation_analysis.reporting as reporting
+    missing = tmp_path / "missing-font.ttc"
+    monkeypatch.setattr(reporting, "CHINESE_FONT", missing)
+    with pytest.warns(RuntimeWarning, match="Chinese font"):
+        _, metadata = _resolve_chinese_font()
+    assert metadata["requested_path"] == str(missing)
+    assert metadata["fallback_used"] is True
+    assert Path(metadata["resolved_path"]).is_file()
+
+
 def _write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
@@ -174,7 +207,7 @@ def _synthetic_staging(root: Path):
                         "fold_count": [5, 5],
                     }
                 ).to_csv(run / "internal_cv_iteration_summary.csv", index=False)
-                pd.DataFrame([
+                fold_scores = pd.DataFrame([
                     {
                         "fold": fold, "iteration": iteration, "record_macro_f1": 0.7,
                         "looseness_actual_count": 5, "looseness_to_bearing_count": 2,
@@ -183,7 +216,14 @@ def _synthetic_staging(root: Path):
                         "bearing_to_looseness_rate": 0.4, "bearing_other_max_offdiag_count": 1,
                     }
                     for fold in range(1, 6) for iteration in (20, 40)
-                ]).to_csv(run / "internal_cv_fold_scores.csv", index=False)
+                ])
+                for actual in range(6):
+                    for predicted in range(6):
+                        if actual != predicted:
+                            fold_scores[f"confusion_true_{actual}_pred_{predicted}_count"] = 0
+                fold_scores.loc[:, "confusion_true_3_pred_4_count"] = 2
+                fold_scores.loc[:, "confusion_true_4_pred_3_count"] = 2
+                fold_scores.to_csv(run / "internal_cv_fold_scores.csv", index=False)
                 metadata = {"selected_iteration": 40, "split_mode": split_mode, "channel": channel}
                 _write_json(run / "metadata.json", metadata)
                 report = {
@@ -269,20 +309,23 @@ def test_generate_reports_writes_exact_tables_sections_and_readable_plots(tmp_pa
     assert "独立测试窗口级" in conclusion
     assert "独立测试 record 级" in conclusion
     assert "不作因果解释" in conclusion
+    assert "可忽略效应的比例" in conclusion
+    assert "可忽略或小效应" not in conclusion
     assert "建议开展新特征研究" in conclusion
     recall_deltas = pd.read_csv(tmp_path / "comparison" / "class_recall_deltas.csv")
     assert len(recall_deltas) == 3 * 2 * 2 * 6
     assert set(recall_deltas["class"]) == set(LABEL_ORDER)
     decision = pd.read_csv(tmp_path / "comparison" / "new_feature_decision.csv")
     assert decision["recommend_new_features"].eq(True).all()
+    font_metadata = json.loads((tmp_path / "figures" / "font_metadata.json").read_text())
+    assert font_metadata["requested_path"] == "/System/Library/Fonts/STHeiti Medium.ttc"
 
 
 def test_generate_reports_renders_negative_new_feature_decision_from_cv_evidence(tmp_path):
     diagnostics, consolidated, decisions = _synthetic_staging(tmp_path)
     score_path = tmp_path / "models" / "record" / "ch3" / "features_40" / "internal_cv_fold_scores.csv"
     scores = pd.read_csv(score_path)
-    scores.loc[scores["iteration"].eq(40), "looseness_to_bearing_count"] = 0
-    scores.loc[scores["iteration"].eq(40), "looseness_to_bearing_rate"] = 0.0
+    scores.loc[scores["iteration"].eq(40), "confusion_true_3_pred_4_count"] = 0
     scores.to_csv(score_path, index=False)
 
     generate_reports(tmp_path, diagnostics, consolidated, decisions)
