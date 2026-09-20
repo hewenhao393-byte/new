@@ -14,7 +14,14 @@ def assess_quality(x):
     if len(x)<CONFIG.original_fs: reasons.append("too_short")
     if not np.isfinite(x).all(): reasons.append("non_finite")
     if x.size and np.all(x==0): reasons.append("all_zero")
-    if x.size>1 and np.max(np.abs(np.diff(x)))>50*np.std(x): warnings.append("possible_discontinuity")
+    if x.size>1 and np.isfinite(x).all():
+        delta=np.diff(x); scale=np.median(np.abs(delta))+CONFIG.eps
+        if np.max(np.abs(delta))>100*scale: warnings.append("possible_discontinuity")
+        same=(delta==0).astype(np.int8)
+        if same.any():
+            edges=np.flatnonzero(np.diff(np.r_[0,same,0])); longest=int(np.max(edges[1::2]-edges[::2]))
+            if longest>=100: warnings.append("long_constant_run")
+        if max(np.mean(x==np.min(x)),np.mean(x==np.max(x)))>.005: warnings.append("possible_clipping")
     flag="reject" if reasons else ("warn" if warnings else "pass")
     return QualityResult(flag,";".join(reasons+warnings),tuple(reasons))
 
