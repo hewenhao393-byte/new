@@ -87,6 +87,37 @@ def test_invalid_source_rows_are_rejected(row, message):
         consolidate_pairs(_pairs([row]))
 
 
+@pytest.mark.parametrize("pearson_r", [1.0001, -1.0001])
+def test_pearson_values_outside_correlation_range_are_rejected(pearson_r):
+    with pytest.raises(ValueError, match="outside correlation range"):
+        consolidate_pairs(_pairs([("rms", "std", pearson_r, 3, "record")]))
+
+
+@pytest.mark.parametrize("pearson_r", [1.0, -1.0])
+def test_pearson_correlation_boundaries_are_accepted(pearson_r):
+    result = consolidate_pairs(_pairs([("rms", "std", pearson_r, 3, "record")]))
+
+    assert result.loc[0, "min_abs_r"] == 1.0
+    assert result.loc[0, "max_abs_r"] == 1.0
+
+
+def test_integral_float_channel_is_normalized_to_canonical_integer():
+    result = consolidate_pairs(_pairs([("rms", "std", 0.99, 3.0, "record")]))
+
+    assert result.loc[0, "channels"] == [3]
+    assert isinstance(result.loc[0, "channels"][0], int)
+
+
+@pytest.mark.parametrize("missing_feature", [None, np.nan, pd.NA])
+@pytest.mark.parametrize("feature_column", ["feature_a", "feature_b"])
+def test_missing_feature_names_are_rejected_clearly(feature_column, missing_feature):
+    row = {"feature_a": "rms", "feature_b": "std", "pearson_r": 0.99, "channel": 3, "split_mode": "record"}
+    row[feature_column] = missing_feature
+
+    with pytest.raises(ValueError, match=rf"missing {feature_column}"):
+        consolidate_pairs(pd.DataFrame([row]))
+
+
 @pytest.mark.parametrize("include_source_rows", [False, True])
 def test_empty_input_has_stable_columns(include_source_rows):
     result = consolidate_pairs(_pairs([]), include_source_rows=include_source_rows)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from numbers import Real
 
 import pandas as pd
 
@@ -48,6 +49,10 @@ def consolidate_pairs(pairs: pd.DataFrame, include_source_rows: bool = False) ->
     normalized = []
     identities = set()
     for source in pairs[_SOURCE_COLUMNS].itertuples(index=False):
+        if pd.isna(source.feature_a):
+            raise ValueError("missing feature_a")
+        if pd.isna(source.feature_b):
+            raise ValueError("missing feature_b")
         feature_a, feature_b = _canonical_pair(source.feature_a, source.feature_b)
         try:
             pearson_r = float(source.pearson_r)
@@ -55,14 +60,19 @@ def consolidate_pairs(pairs: pd.DataFrame, include_source_rows: bool = False) ->
             raise ValueError("non-finite pearson_r") from exc
         if not math.isfinite(pearson_r):
             raise ValueError("non-finite pearson_r")
+        if not -1.0 <= pearson_r <= 1.0:
+            raise ValueError(f"outside correlation range [-1, 1]: {pearson_r}")
         if abs(pearson_r) < 0.95:
             raise ValueError(f"below correlation threshold: {pearson_r}")
-        if source.channel not in _CHANNELS:
+        if not isinstance(source.channel, Real) or isinstance(source.channel, bool):
+            raise ValueError(f"invalid channel: {source.channel}")
+        channel = int(source.channel)
+        if source.channel != channel or channel not in _CHANNELS:
             raise ValueError(f"invalid channel: {source.channel}")
         if source.split_mode not in _SPLIT_MODES:
             raise ValueError(f"invalid split_mode: {source.split_mode}")
 
-        identity = (source.channel, source.split_mode, feature_a, feature_b)
+        identity = (channel, source.split_mode, feature_a, feature_b)
         if identity in identities:
             raise ValueError(f"duplicate source identity: {identity}")
         identities.add(identity)
@@ -71,7 +81,7 @@ def consolidate_pairs(pairs: pd.DataFrame, include_source_rows: bool = False) ->
                 "feature_a": feature_a,
                 "feature_b": feature_b,
                 "pearson_r": pearson_r,
-                "channel": source.channel,
+                "channel": channel,
                 "split_mode": source.split_mode,
             }
         )
