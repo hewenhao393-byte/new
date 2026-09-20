@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -74,6 +75,50 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _digest_json(value) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _certificate_payload(root: Path, manifest: dict) -> dict:
+    protocol_keys = ("iteration_grid", "max_iterations", "cv_splits", "selection_metric", "tie_rule",
+                     "grouping", "catboost_params_except_iterations", "feature_sets", "removed_features", "label_order")
+    protocol = {key: manifest[key] for key in protocol_keys}
+    artifacts = {}
+    for mode in ("record", "temporal"):
+        for channel in (3, 4, 5):
+            stem = f"{mode}_ch{channel}"
+            for suffix in (".csv", "_indices.npz"):
+                path = root / "fold_manifests" / f"{stem}{suffix}"
+                artifacts[str(path.relative_to(root))] = _sha256(path)
+            for feature_set in ("features_43", "features_40"):
+                run = root / "models" / mode / f"ch{channel}" / feature_set
+                for name in ("internal_cv_fold_scores.csv", "internal_cv_iteration_summary.csv", "model.cbm", "metadata.json"):
+                    path = run / name; artifacts[str(path.relative_to(root))] = _sha256(path)
+    verifier_sha = _sha256(Path(__file__))
+    entries = {
+        "verifier_source_sha256": verifier_sha,
+        "fixed_protocol_digest": _digest_json(protocol),
+        "canonical_input_hash_digest": _digest_json(manifest["input_sha256"]),
+        "artifacts": dict(sorted(artifacts.items())),
+    }
+    return {**entries, "artifact_fingerprint": _digest_json(entries)}
+
+
+def _valid_deep_certificate(root: Path, manifest: dict):
+    path = root / "comparison" / "deep_verification_certificate.json"
+    if not path.is_file(): return None
+    try: certificate = _json(path)
+    except Exception: return None
+    expected = _certificate_payload(root, manifest)
+    required = {"mode": "deep", "deep_evidence_count": 12, **expected}
+    if any(certificate.get(key) != value for key, value in required.items()): return None
+    ids = certificate.get("deep_evidence_row_ids")
+    if not isinstance(ids, list) or len(ids) != 12 or len(set(ids)) != 12: return None
+    if not isinstance(certificate.get("deep_verified_at"), str): return None
+    return certificate
 
 
 def _json(path: Path):
@@ -490,20 +535,47 @@ def verify_output(output_root, *, deep: bool = True, _accepted=None) -> pd.DataF
                 raise ValueError(f"persisted figure pixel mismatch: {saved_path}")
     passed("figure_fidelity", "deterministic_rerender", str(render_root))
 
-    if not deep and (root / "verification_report.csv").is_file():
+    certificate = None
+    if deep:
+        payload = _certificate_payload(root, manifest)
+        deep_ids = [row["item"] for row in checks if row["category"] == "deep_cv"]
+        if len(deep_ids) != 12:
+            raise ValueError("deep evidence row count is not 12")
+        certificate = {"mode": "deep", "deep_verified_at": datetime.now(timezone.utc).isoformat(),
+                       **payload, "deep_evidence_row_ids": deep_ids, "deep_evidence_count": 12}
+        certificate_path = root / "comparison" / "deep_verification_certificate.json"
+        certificate_temp = root / "comparison" / f".deep_verification_certificate-{uuid4().hex}.json"
+        certificate_temp.write_text(json.dumps(certificate, ensure_ascii=False, indent=2), encoding="utf-8")
+        certificate_temp.replace(certificate_path)
+        for row in checks:
+            if row["category"] == "deep_cv":
+                row.update(deep_mode="deep", deep_verified_at=certificate["deep_verified_at"],
+                           certificate_fingerprint=certificate["artifact_fingerprint"])
+    elif (root / "verification_report.csv").is_file():
+        certificate = _valid_deep_certificate(root, manifest)
         prior = pd.read_csv(root / "verification_report.csv")
         prior_deep = prior[prior.category.eq("deep_cv")]
-        if len(prior_deep) == 12 and prior_deep.passed.all() and not prior_deep.duplicated(["category", "item"]).any():
+        if (certificate is not None and len(prior_deep) == 12 and prior_deep.passed.all()
+                and not prior_deep.duplicated(["category", "item"]).any()
+                and set(prior_deep.item) == set(certificate["deep_evidence_row_ids"])
+                and prior_deep["certificate_fingerprint"].eq(certificate["artifact_fingerprint"]).all()):
             checks.extend(prior_deep.to_dict("records"))
-    report = pd.DataFrame(checks, columns=["category", "item", "passed", "detail"])
+    report = pd.DataFrame(checks)
+    for column in ("deep_mode", "deep_verified_at", "certificate_fingerprint"):
+        if column not in report: report[column] = ""
     if report.duplicated(["category", "item"]).any():
         raise ValueError("verification check IDs are not unique")
     report_path = root / "verification_report.csv"
     report_temp = root / f".verification_report-{uuid4().hex}.csv"
     report.to_csv(report_temp, index=False, encoding="utf-8-sig")
+    preserved = (not deep and certificate is not None and report.category.eq("deep_cv").sum() == 12)
     summary = (
         "# 独立验证摘要\n\n"
         f"- 结论：**PASS**\n- 通过检查：{len(report)}\n- 模型运行：12\n"
+        f"- 当前运行模式：{'deep' if deep else 'shallow'}\n"
+        f"- preserved_deep_validated：{str(preserved).lower()}\n"
+        f"- deep_certificate_fingerprint：{certificate['artifact_fingerprint'] if certificate else 'none'}\n"
+        f"- previous_deep_verified_at：{certificate['deep_verified_at'] if certificate else 'none'}\n"
         f"- 逐类 Recall 差值：72 行\n- 模型重载概率容差：1e-12\n"
         "- 诊断键连接：6 组均 unmatched=0\n"
     )

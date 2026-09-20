@@ -96,6 +96,14 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
     checks = verify_output(output)
     assert checks["passed"].all()
     assert len(checks) >= 100
+    assert checks.category.eq("deep_cv").sum() == 12
+    certificate = output / "comparison" / "deep_verification_certificate.json"
+    assert certificate.is_file()
+    shallow = verify_output(output, deep=False)
+    assert shallow.category.eq("deep_cv").sum() == 12
+    certificate.rename(certificate.with_suffix(".json.hidden"))
+    shallow_without_certificate = verify_output(output, deep=False)
+    assert shallow_without_certificate.category.eq("deep_cv").sum() == 0
     assert (output / "verification_report.csv").is_file()
     assert "PASS" in (output / "verification_summary.md").read_text(encoding="utf-8")
 
