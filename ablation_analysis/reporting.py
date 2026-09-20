@@ -474,18 +474,31 @@ def _aggregate_diagnostics(diagnostic_tables: Mapping):
     )
 
 
-def _plot_iteration_curves(curves: pd.DataFrame, output: Path, font: FontProperties) -> None:
+def _plot_iteration_curves(curves: pd.DataFrame, selected: pd.DataFrame, output: Path, font: FontProperties):
     output.mkdir(parents=True, exist_ok=True)
+    artists = {}
     for (channel, split, feature_set), frame in curves.groupby(["channel", "split_mode", "feature_set"], sort=True):
+        matches = selected[(selected.channel == channel) & (selected.split_mode == split) & (selected.feature_set == feature_set)]
+        if len(matches) != 1:
+            raise ValueError(f"selected iteration coverage must be exactly one row for CH{channel} {split} {feature_set}")
+        chosen = int(matches.iloc[0]["selected_iteration"])
+        if chosen not in set(frame["iteration"].astype(int)):
+            raise ValueError(f"selected iteration {chosen} is absent from curve")
         fig, ax = plt.subplots(figsize=(8, 5), dpi=120)
         ax.plot(frame["iteration"], frame["mean_record_macro_f1"], marker="o", linewidth=2)
+        marker = ax.axvline(chosen, color="#d62728", linestyle="--", linewidth=2, label=f"选定轮数 {chosen}")
+        selected_y = float(frame.loc[frame["iteration"].eq(chosen), "mean_record_macro_f1"].iloc[0])
+        ax.scatter([chosen], [selected_y], color="#d62728", marker="*", s=140, zorder=4)
         ax.set_title(f"CH{channel} {split} {feature_set} 训练内部CV轮数曲线", fontproperties=font)
         ax.set_xlabel("迭代轮数", fontproperties=font)
         ax.set_ylabel("record级 Macro-F1", fontproperties=font)
         ax.grid(alpha=0.25)
+        ax.legend(prop=font)
         fig.tight_layout()
         fig.savefig(output / f"ch{channel}_{split}_{feature_set}.png")
         plt.close(fig)
+        artists[(channel, split, feature_set)] = marker
+    return artists
 
 
 def _plot_class_recalls(recalls: pd.DataFrame, output: Path, font: FontProperties) -> None:
@@ -670,7 +683,8 @@ def generate_reports(
     (figures_dir / "font_metadata.json").write_text(
         json.dumps(font_metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    _plot_iteration_curves(curves, figures_dir / "iteration_curves", font)
+    _plot_iteration_curves(curves, metrics[["channel", "split_mode", "feature_set", "selected_iteration"]],
+                           figures_dir / "iteration_curves", font)
     _plot_class_recalls(recalls, figures_dir / "class_recall", font)
     _write_conclusion(
         staging / "conclusion.md", metrics, deltas, chosen_recalls, unique, decision, effects, concentration,

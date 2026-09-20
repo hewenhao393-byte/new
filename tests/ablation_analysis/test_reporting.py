@@ -5,16 +5,30 @@ import numpy as np
 import pandas as pd
 import pytest
 from PIL import Image
+from matplotlib.font_manager import FontProperties
 
 from ablation_analysis.config import LABEL_ORDER
 from ablation_analysis.reporting import (
     _aggregate_selected_cv_confusion,
+    _plot_iteration_curves,
     _resolve_chinese_font,
     assess_ch5_unique_value,
     generate_reports,
     recommend_feature_set,
     recommend_new_features,
 )
+
+
+def test_iteration_plot_marks_selected_iteration_with_labeled_artist(tmp_path):
+    curves = pd.DataFrame({"channel": [3, 3], "split_mode": ["record"] * 2,
+                           "feature_set": ["features_43"] * 2, "iteration": [20, 40],
+                           "mean_record_macro_f1": [.8, .9]})
+    selected = pd.DataFrame({"channel": [3], "split_mode": ["record"],
+                             "feature_set": ["features_43"], "selected_iteration": [40]})
+    artists = _plot_iteration_curves(curves, selected, tmp_path, FontProperties())
+    marker = artists[(3, "record", "features_43")]
+    assert list(marker.get_xdata()) == [40, 40]
+    assert marker.get_label() == "选定轮数 40"
 
 
 def _six_deltas(record=-0.005, looseness=-0.01, bearing=-0.01):
