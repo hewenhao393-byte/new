@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from uuid import uuid4
 
 import numpy as np
 import pandas as pd
+import catboost
+import sklearn
 from catboost import CatBoostClassifier, Pool
 from PIL import Image
 
@@ -36,6 +39,21 @@ MODEL_FILES = {
     "internal_cv_iteration_summary.csv", "window_predictions.csv",
     "record_predictions.csv", "window_metrics.json", "record_metrics.json",
     "feature_importance.csv",
+}
+
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+DEEP_SEMANTIC_MODULE_PATHS = {
+    relative: _SOURCE_ROOT / relative
+    for relative in (
+        "ablation_analysis/config.py",
+        "ablation_analysis/iteration_selection.py",
+        "ablation_analysis/modeling.py",
+        "ablation_analysis/reporting.py",
+        "ablation_analysis/verification.py",
+        "baseline_analysis/config.py",
+        "baseline_analysis/evaluation.py",
+        "baseline_analysis/modeling.py",
+    )
 }
 
 
@@ -97,9 +115,21 @@ def _certificate_payload(root: Path, manifest: dict) -> dict:
                 run = root / "models" / mode / f"ch{channel}" / feature_set
                 for name in ("internal_cv_fold_scores.csv", "internal_cv_iteration_summary.csv", "model.cbm", "metadata.json"):
                     path = run / name; artifacts[str(path.relative_to(root))] = _sha256(path)
-    verifier_sha = _sha256(Path(__file__))
+    semantic_module_sha256 = {
+        relative: _sha256(path)
+        for relative, path in sorted(DEEP_SEMANTIC_MODULE_PATHS.items())
+    }
+    runtime_versions = {
+        "python": platform.python_version(),
+        "catboost": catboost.__version__,
+        "sklearn": sklearn.__version__,
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
+    }
     entries = {
-        "verifier_source_sha256": verifier_sha,
+        "verifier_source_sha256": semantic_module_sha256["ablation_analysis/verification.py"],
+        "semantic_module_sha256": semantic_module_sha256,
+        "runtime_versions": runtime_versions,
         "fixed_protocol_digest": _digest_json(protocol),
         "canonical_input_hash_digest": _digest_json(manifest["input_sha256"]),
         "artifacts": dict(sorted(artifacts.items())),

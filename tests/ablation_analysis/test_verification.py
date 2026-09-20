@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -106,6 +107,54 @@ def test_verifier_accepts_complete_output_and_writes_detailed_reports(tmp_path, 
     assert shallow_without_certificate.category.eq("deep_cv").sum() == 0
     assert (output / "verification_report.csv").is_file()
     assert "PASS" in (output / "verification_summary.md").read_text(encoding="utf-8")
+
+
+def test_deep_certificate_binds_semantic_modules_and_runtime_versions(tmp_path, monkeypatch):
+    output = _build_fixture(tmp_path, monkeypatch)
+    verify_output(output, deep=True)
+    certificate = json.loads((output / "comparison" / "deep_verification_certificate.json").read_text())
+    assert set(certificate["semantic_module_sha256"]) == {
+        "ablation_analysis/config.py", "ablation_analysis/iteration_selection.py",
+        "ablation_analysis/modeling.py", "ablation_analysis/reporting.py",
+        "ablation_analysis/verification.py", "baseline_analysis/config.py",
+        "baseline_analysis/evaluation.py", "baseline_analysis/modeling.py",
+    }
+    assert set(certificate["runtime_versions"]) == {"python", "catboost", "sklearn", "numpy", "pandas"}
+    assert all(len(value) == 64 for value in certificate["semantic_module_sha256"].values())
+
+
+def test_semantic_module_change_invalidates_deep_carry(tmp_path, monkeypatch):
+    output = _build_fixture(tmp_path, monkeypatch)
+    verify_output(output, deep=True)
+    import ablation_analysis.verification as verification
+    changed = tmp_path / "verification_changed.py"
+    shutil.copyfile(verification.DEEP_SEMANTIC_MODULE_PATHS["ablation_analysis/verification.py"], changed)
+    changed.write_text(changed.read_text() + "\n# simulated semantic change\n")
+    paths = dict(verification.DEEP_SEMANTIC_MODULE_PATHS)
+    paths["ablation_analysis/verification.py"] = changed
+    monkeypatch.setattr(verification, "DEEP_SEMANTIC_MODULE_PATHS", paths)
+    shallow = verify_output(output, deep=False)
+    assert shallow.category.eq("deep_cv").sum() == 0
+    assert "preserved_deep_validated：false" in (output / "verification_summary.md").read_text()
+
+
+def test_coherent_cv_evidence_change_invalidates_deep_carry(tmp_path, monkeypatch):
+    output = _build_fixture(tmp_path, monkeypatch)
+    verify_output(output, deep=True)
+    run = output / "models" / "record" / "ch3" / "features_40"
+    scores_path = run / "internal_cv_fold_scores.csv"
+    summary_path = run / "internal_cv_iteration_summary.csv"
+    scores = pd.read_csv(scores_path)
+    selected_before = json.loads((run / "metadata.json").read_text())["selected_iteration"]
+    scores.loc[scores.iteration.eq(scores.iteration.min()), "record_macro_f1"] -= 1e-4
+    scores.to_csv(scores_path, index=False)
+    from ablation_analysis.iteration_selection import aggregate_cv_scores, choose_iteration
+    summary = aggregate_cv_scores(scores)
+    assert choose_iteration(summary, checkpoints=[2, 4], expected_folds=5) == selected_before
+    summary.to_csv(summary_path, index=False)
+    from ablation_analysis.verification import _valid_deep_certificate
+    manifest = json.loads((output / "run_manifest.json").read_text())
+    assert _valid_deep_certificate(output, manifest) is None
 
 
 @pytest.mark.parametrize("mutation,match", [
