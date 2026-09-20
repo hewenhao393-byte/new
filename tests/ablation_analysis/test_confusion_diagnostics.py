@@ -222,3 +222,37 @@ def test_targeted_error_concentration_requires_all_record_metadata(missing):
 
     with pytest.raises(ValueError, match=rf"missing required columns.*{missing}"):
         targeted_error_concentration(frame)
+
+
+def test_targeted_error_concentration_rejects_conflicting_record_metadata_including_missing():
+    frame = pd.DataFrame(
+        {
+            "target_group": ["looseness_to_bearing", "looseness_to_bearing"],
+            "record_id": ["r1", "r1"],
+            "motor": ["M2", "M2"],
+            "rpm": [740, 740],
+            "condition": ["c", "c"],
+            "state": ["s", "s"],
+            "severity": [1, np.nan],
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"conflicting metadata.*r1"):
+        targeted_error_concentration(frame)
+
+
+def test_targeted_error_concentration_rejects_null_record_id():
+    frame = pd.DataFrame(
+        {
+            "target_group": ["bearing_to_looseness"],
+            "record_id": [None],
+            "motor": ["M2"],
+            "rpm": [740],
+            "condition": ["c"],
+            "state": ["s"],
+            "severity": [1],
+        }
+    )
+
+    with pytest.raises(ValueError, match="null record_id"):
+        targeted_error_concentration(frame)

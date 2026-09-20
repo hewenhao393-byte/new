@@ -160,15 +160,25 @@ def targeted_error_concentration(frame: pd.DataFrame):
         frame["target_group"] = assign_target_group(frame["label"], frame["predicted_label"])
     _require_columns(frame, ["record_id", *METADATA_COLUMNS])
     errors = frame.loc[frame["target_group"].isin(ERROR_GROUPS)].copy()
-    group_columns = ["target_group", "record_id", *METADATA_COLUMNS]
-    per_record = (
-        errors.groupby(group_columns, dropna=False, sort=False)
-        .size()
-        .rename("error_windows")
-        .reset_index()
-        .sort_values(["error_windows", "record_id"], ascending=[False, True], kind="stable")
-        .reset_index(drop=True)
-    )
+    if errors["record_id"].isna().any():
+        raise ValueError("null record_id is not allowed in targeted errors")
+
+    metadata_variants = errors.groupby("record_id", sort=False)[list(METADATA_COLUMNS)].nunique(dropna=False)
+    conflicting_records = metadata_variants.index[metadata_variants.gt(1).any(axis=1)].tolist()
+    if conflicting_records:
+        raise ValueError(f"conflicting metadata for record_id: {conflicting_records}")
+
+    if errors.empty:
+        per_record = pd.DataFrame(columns=["target_group", "record_id", *METADATA_COLUMNS, "error_windows"])
+    else:
+        record_details = errors.groupby("record_id", sort=False)[["target_group", *METADATA_COLUMNS]].first().reset_index()
+        record_counts = errors.groupby("record_id", sort=False).size().rename("error_windows").reset_index()
+        per_record = (
+            record_counts.merge(record_details, on="record_id", how="inner", validate="one_to_one")
+            [["target_group", "record_id", *METADATA_COLUMNS, "error_windows"]]
+            .sort_values(["error_windows", "record_id"], ascending=[False, True], kind="stable")
+            .reset_index(drop=True)
+        )
     total = int(per_record["error_windows"].sum()) if not per_record.empty else 0
     top5 = int(per_record["error_windows"].head(5).sum()) if not per_record.empty else 0
     summary = {
