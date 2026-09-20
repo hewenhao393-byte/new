@@ -26,7 +26,7 @@ def verify_output(root):
     import pandas as pd
     report={"passed":True,"modes":{}}
     for folder in ("file_split","temporal_split"):
-        tables={ch:pd.read_csv(Path(root)/folder/f"features_ch{ch}.csv") for ch in (3,4,5)}
+        tables={ch:pd.read_csv(Path(root)/folder/f"features_ch{ch}.csv",low_memory=False) for ch in (3,4,5)}
         for df in tables.values(): validate_table(df)
         validate_channel_alignment(tables)
         if folder=="file_split":
