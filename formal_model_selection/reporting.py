@@ -24,4 +24,5 @@ def create_reports(root,fold_scores,summary,chosen,comparison):
 def save_run_confusions(run_dir,wm,rm,title):
     for level,m in [("window",wm),("record",rm)]:
         pd.DataFrame(m["confusion_matrix"],index=LABEL_ORDER,columns=LABEL_ORDER).to_csv(Path(run_dir)/f"{level}_confusion_matrix.csv",encoding="utf-8-sig")
-        save_confusion(m["confusion_matrix"],Path(run_dir)/f"{level}_confusion_matrix.png",f"{title} {level}")
+        level_title="窗口级" if level=="window" else "record级"
+        save_confusion(m["confusion_matrix"],Path(run_dir)/f"{level}_confusion_matrix.png",f"{title} {level_title}混淆矩阵")

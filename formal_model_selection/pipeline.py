@@ -33,7 +33,9 @@ def run_pipeline(source_root,output_root):
         params=CANDIDATES[chosen["candidate"]]; rows=[]
         for mode in ("record","temporal"):
             for ch in (3,4,5):
-                out=stage/"models"/mode/f"ch{ch}"; out.parent.mkdir(parents=True,exist_ok=True); wm,rm=train_final(tables[mode][ch],mode,ch,params,int(chosen["iteration"]),out); save_run_confusions(out,wm,rm,f"CH{ch} {mode}")
+                out=stage/"models"/mode/f"ch{ch}"; out.parent.mkdir(parents=True,exist_ok=True); wm,rm=train_final(tables[mode][ch],mode,ch,params,int(chosen["iteration"]),out)
+                split_title="记录级分组划分" if mode=="record" else "时间块划分"
+                save_run_confusions(out,wm,rm,f"CH{ch} {split_title}")
                 row={"channel":f"CH{ch}","split_mode":mode,"window_accuracy":wm["accuracy"],"window_macro_f1":wm["macro_f1"],"window_weighted_f1":wm["weighted_f1"],"record_accuracy":rm["accuracy"],"record_macro_f1":rm["macro_f1"],"record_weighted_f1":rm["weighted_f1"],**_recalls(wm,"window"),**_recalls(rm,"record")}; rows.append(row)
         comparison=pd.DataFrame(rows); comparison.to_csv(stage/"final_model_comparison.csv",index=False,encoding="utf-8-sig"); create_reports(stage,fold_scores,summary,chosen,comparison)
         manifest={"source":str(source.resolve()),"input_sha256":hashes,"features":FEATURES,"labels":LABEL_ORDER,"candidates":CANDIDATES,"checkpoints":CHECKPOINTS,"cv_splits":3,"fold_hash":fold_hash,"score":"equal mean of CH3/CH4/CH5 fold means","tolerance":.002,"selected":{"candidate":chosen["candidate"],"iteration":int(chosen["iteration"]),"params":params},"common":COMMON}
