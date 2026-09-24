@@ -1,0 +1,160 @@
+{
+  "software_version": "pump-fault-app-v3",
+  "model_version": "catboost43-six-class-v3",
+  "feature_version": "43-feature-v1",
+  "contract_version": "formal-V3-catboost43",
+  "training_scope": "all_accepted_data",
+  "intended_use": "software_inference_only",
+  "evaluation_claims": null,
+  "parameter_statement": "P1@500 selected within the predefined candidate range; not a global optimum claim",
+  "features": [
+    "rms",
+    "std",
+    "peak_to_peak",
+    "skewness",
+    "kurtosis",
+    "crest_factor",
+    "impulse_factor",
+    "clearance_factor",
+    "shape_factor",
+    "rot_1x_energy_ratio",
+    "rot_2x_energy_ratio",
+    "rot_3x_energy_ratio",
+    "rot_2x_1x_ratio",
+    "rot_3x_1x_ratio",
+    "harmonic_energy_ratio_1x_5x",
+    "harmonic_energy_ratio_3x_5x",
+    "rot_2x_harmonic_ratio",
+    "rot_05x_1x_ratio",
+    "noninteger_harmonic_energy_ratio",
+    "spectral_entropy",
+    "spectral_flatness",
+    "spectral_centroid",
+    "spectral_bandwidth",
+    "band_energy_5_300_ratio",
+    "band_energy_300_1000_ratio",
+    "band_energy_1000_3000_ratio",
+    "band_energy_3000_5000_ratio",
+    "high_low_energy_ratio",
+    "wp_energy_ratio_0",
+    "wp_energy_ratio_1",
+    "wp_energy_ratio_2",
+    "wp_energy_ratio_3",
+    "wp_energy_ratio_4",
+    "wp_energy_ratio_5",
+    "wp_energy_ratio_6",
+    "wp_energy_ratio_7",
+    "wp_energy_entropy",
+    "env_kurtosis",
+    "env_crest_factor",
+    "env_spectral_entropy",
+    "env_peak_energy_ratio",
+    "env_peak_concentration",
+    "env_peak_count"
+  ],
+  "labels": [
+    "正常",
+    "转子不平衡",
+    "联轴器不对中",
+    "松动",
+    "轴承故障",
+    "汽蚀"
+  ],
+  "params": {
+    "loss_function": "MultiClass",
+    "iterations": 500,
+    "depth": 8,
+    "learning_rate": 0.05,
+    "l2_leaf_reg": 100,
+    "random_strength": 5,
+    "rsm": 0.7,
+    "auto_class_weights": "SqrtBalanced",
+    "random_seed": 2026,
+    "allow_writing_files": false,
+    "verbose": false,
+    "thread_count": 4
+  },
+  "sources": {
+    "CH3": {
+      "path": "/Users/hewenhao/Documents/特征提取/实验结果/单通道43维_两种划分_20260920/file_split/features_ch3.csv",
+      "sha256": "7d77a646872efb485d3fd1d981f9e9cdd8dc7f05862a997c17621e68ef4a0b74"
+    },
+    "CH4": {
+      "path": "/Users/hewenhao/Documents/特征提取/实验结果/单通道43维_两种划分_20260920/file_split/features_ch4.csv",
+      "sha256": "42e90cc3cdeaceaa015029bdeed5d4d68fd87b494a0b503c7c8f1d2e128caa6f"
+    },
+    "CH5": {
+      "path": "/Users/hewenhao/Documents/特征提取/实验结果/单通道43维_两种划分_20260920/file_split/features_ch5.csv",
+      "sha256": "df0f5b25fad6f1c678f1c5838990b4aa0a5d6d285f10e3dcc5050a78712de3a9"
+    }
+  },
+  "models": {
+    "CH3": {
+      "file": "ch3.cbm",
+      "sha256": "43294c145aa3703af947e737d337f6b234ac2109877baeab9657f2d6dc24c52d",
+      "classes": [
+        "松动",
+        "正常",
+        "汽蚀",
+        "联轴器不对中",
+        "转子不平衡",
+        "轴承故障"
+      ],
+      "rows": 108855,
+      "records": 1845,
+      "class_distribution": {
+        "正常": 42067,
+        "松动": 9617,
+        "轴承故障": 29323,
+        "汽蚀": 7493,
+        "联轴器不对中": 12803,
+        "转子不平衡": 7552
+      }
+    },
+    "CH4": {
+      "file": "ch4.cbm",
+      "sha256": "e3e114eb0d7dab3a0472f369e96cd362022f5b7fa40d10eaf4bb03d2b4dbfac3",
+      "classes": [
+        "松动",
+        "正常",
+        "汽蚀",
+        "联轴器不对中",
+        "转子不平衡",
+        "轴承故障"
+      ],
+      "rows": 108855,
+      "records": 1845,
+      "class_distribution": {
+        "正常": 42067,
+        "松动": 9617,
+        "轴承故障": 29323,
+        "汽蚀": 7493,
+        "联轴器不对中": 12803,
+        "转子不平衡": 7552
+      }
+    },
+    "CH5": {
+      "file": "ch5.cbm",
+      "sha256": "baa15fa06f9748d68fd0f6ab4f2fcb18fbea3473ce51e6f63dd6177273482fd0",
+      "classes": [
+        "松动",
+        "正常",
+        "汽蚀",
+        "联轴器不对中",
+        "转子不平衡",
+        "轴承故障"
+      ],
+      "rows": 108855,
+      "records": 1845,
+      "class_distribution": {
+        "正常": 42067,
+        "松动": 9617,
+        "轴承故障": 29323,
+        "汽蚀": 7493,
+        "联轴器不对中": 12803,
+        "转子不平衡": 7552
+      }
+    }
+  },
+  "parent_group_evaluation_reused": false
+}
