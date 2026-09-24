@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from pump_fault_app.app import cli
+from pump_fault_app.app import self_check
 from pump_fault_app.app.self_check import run_system_self_check
 from pump_fault_app.batch import BatchInferenceRequest, load_batch_manifest, run_batch_inference
 from pump_fault_app.domain.diagnosis_models import (
@@ -116,3 +117,13 @@ def test_self_check_validates_three_deployment_models(tmp_path: Path) -> None:
     item = next(row for row in payload["items"] if row["check_name"] == "deployment_model_contract")
     assert item["status"] == "passed"
     assert "CH3, CH4, CH5" in item["message"]
+
+
+def test_self_check_module_main_prints_json(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        self_check,
+        "run_system_self_check",
+        lambda **_: {"overall_status": "passed", "items": []},
+    )
+    assert self_check.main([]) == 0
+    assert json.loads(capsys.readouterr().out)["overall_status"] == "passed"

@@ -29,7 +29,7 @@ def build_system_overview() -> dict[str, Any]:
     """Build display data from the immutable formal inference contract."""
     contract = FORMAL_V3_CONTRACT
     labels = tuple("机械松动" if label == "松动" else label for label in contract.label_order)
-    features = tuple(_FEATURE_LABELS[name] for name in contract.feature_names)
+    features = tuple(_FEATURE_LABELS.get(name, name) for name in contract.feature_names)
     parameters = {
         "统一采样率": f"{contract.target_sampling_rate} Hz",
         "分析频带": f"{contract.filter_low_hz:g}～{contract.filter_high_hz:g} Hz",
@@ -69,13 +69,13 @@ def build_system_overview() -> dict[str, Any]:
     )
     return {
         "title": "系统原理与模型说明",
-        "subtitle": "基于振动机理特征与BP神经网络的水泵六分类故障诊断方法",
+        "subtitle": "基于43维振动特征与独立通道CatBoost模型的水泵六分类故障诊断方法",
         "pipeline": (
             "振动信号",
             "预处理",
             "滑动窗口",
-            "21维特征",
-            "BP模型",
+            "43维特征",
+            "通道独立CatBoost模型",
             "概率融合",
             "六类故障",
         ),
@@ -83,9 +83,9 @@ def build_system_overview() -> dict[str, Any]:
         "formal_feature_names": contract.feature_names,
         "feature_groups": feature_groups,
         "model": {
-            "名称": "BP神经网络六分类模型",
+            "名称": "CH3/CH4/CH5独立CatBoost六分类模型",
             "诊断方式": "窗口级预测 + 多窗口概率融合",
-            "窗口级预测": "每个0.2 s有效窗口输入固定顺序的21维特征，由BP模型分别输出六类状态概率。",
+            "窗口级预测": "每个0.4 s有效窗口输入固定顺序的43维特征，由对应通道CatBoost模型分别输出六类状态概率。",
             "多窗口概率融合": "对完整振动记录中全部有效窗口的同类概率取平均，以最高平均概率对应类别作为最终诊断结果。",
         },
         "labels": labels,

@@ -14,6 +14,7 @@ from pump_fault_app.prediction import predict_channel_window
 from pump_fault_app.preprocessing import preprocess_raw_signal
 from pump_fault_app.quality import assess_signal_quality
 from pump_fault_app.windowing import segment_preprocessed_signal
+from pump_fault_app.inference.visualization import build_diagnosis_visualization
 
 
 def _invalid(
@@ -83,12 +84,18 @@ def run_channel_inference(
         except Exception as exc:
             return _invalid(item, "prediction", exc, quality_report=quality_report)
 
+    visualization = build_diagnosis_visualization(
+        raw_signal=raw_signal,
+        preprocessed_signal=preprocessed,
+        window_predictions=None,
+    )
     try:
         return fuse_window_probabilities(
             item.channel,
             predictions,
             quality_report=quality_report,
-            warnings=tuple(quality_report.warnings),
+            visualization=visualization,
+            warnings=tuple(quality_report.warnings) + tuple(visualization.warnings),
         )
     except Exception as exc:
         return _invalid(item, "window_fusion", exc, quality_report=quality_report)

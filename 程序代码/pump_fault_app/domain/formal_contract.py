@@ -92,7 +92,7 @@ class SignalContract:
     step_size: int = 2400
     wavelet: str = "db6"
     wavelet_level: int = 3
-    envelope_low_hz: float = 2000.0
+    envelope_low_hz: float = 1000.0
     envelope_high_hz: float = 5000.0
     harmonic_search_half_width_hz: float = 5.0
 

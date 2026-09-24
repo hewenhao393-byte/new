@@ -128,7 +128,7 @@ def _add_conclusion(document: Document, view_data: SingleReportViewData) -> None
 def _add_processing_parameters(document: Document, view_data: SingleReportViewData) -> None:
     document.add_heading("3. 信号处理参数", level=1)
     document.add_paragraph(
-        "以下参数与正式BP模型训练及推理阶段保持一致，用于保证输入信号处理和21维特征构建的一致性。"
+        "以下参数与 CatBoost43 V3 正式部署契约保持一致。"
     )
     table = document.add_table(rows=1, cols=2)
     table.style = "Table Grid"
@@ -144,7 +144,7 @@ def _add_processing_parameters(document: Document, view_data: SingleReportViewDa
 def _add_method_flow(document: Document, view_data: SingleReportViewData) -> None:
     document.add_heading("4. 方法流程", level=1)
     document.add_paragraph(
-        "系统按照信号质量检查、统一预处理、机理相关特征构建、BP识别和窗口结果融合的顺序完成诊断。"
+        "系统按照信号质量检查、统一预处理、43维特征构建、CatBoost独立诊断和概率融合的顺序完成诊断。"
     )
     for step in view_data.method_steps:
         document.add_paragraph(step, style="List Number")
@@ -318,7 +318,7 @@ def _add_optional_bar_chart(
 def _add_scope_note(document: Document) -> None:
     document.add_heading("7. 说明与适用范围", level=1)
     document.add_paragraph(
-        "本报告结果由已训练的 BP 神经网络六分类模型根据输入振动信号自动生成。"
+        "本报告结果由 CH3/CH4/CH5 独立 CatBoost 六分类部署模型根据输入振动信号自动生成。"
         "诊断结论用于辅助状态判断和检修排查，不应替代现场专业检测。"
         "当前模型主要适用于与训练数据采集条件相近的水泵振动信号。"
     )

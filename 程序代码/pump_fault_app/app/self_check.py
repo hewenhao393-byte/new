@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import argparse
 import json
 import os
 from pathlib import Path
@@ -156,3 +157,20 @@ def _record_dependency(items: list[dict[str, str]], module_name: str, *, check_n
 
 def _record(items: list[dict[str, str]], check_name: str, status: str, message: str) -> None:
     items.append({"check_name": check_name, "status": status, "message": message})
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="CatBoost43 V3 system self-check")
+    parser.add_argument("--demo-config")
+    parser.add_argument("--model-directory")
+    args = parser.parse_args(argv)
+    payload = run_system_self_check(
+        demo_config_path=args.demo_config,
+        model_directory=args.model_directory,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 1 if payload["overall_status"] == "failed" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -57,7 +57,7 @@ def main() -> None:
         flow_html.append(f'<span class="principle-flow-step">{escape(step)}</span>')
     st.markdown(f'<div class="principle-flow">{"".join(flow_html)}</div>', unsafe_allow_html=True)
 
-    st.markdown("### 21维振动特征的工程含义")
+    st.markdown("### 43维振动特征的工程含义")
     feature_groups = overview["feature_groups"]
     for group_row in (feature_groups[:2], feature_groups[2:]):
         columns = st.columns(2, gap="large")
@@ -73,7 +73,7 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
 
-    st.markdown("### BP模型与诊断结果融合")
+    st.markdown("### CatBoost模型与诊断结果融合")
     model_columns = st.columns(2, gap="large")
     for column, key in zip(model_columns, ("窗口级预测", "多窗口概率融合")):
         with column:

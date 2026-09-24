@@ -106,9 +106,40 @@ def _render_result(st: Any, app_result: Any) -> None:
     st.markdown(f"### {selected} 模型输出概率")
     st.dataframe(pd.DataFrame(_probability_rows(channel_result.class_probabilities)), hide_index=True, use_container_width=True)
     tabs = st.tabs(("时域波形", "频谱", "包络谱", "小波包能量"))
-    for tab, name in zip(tabs, ("时域波形", "频谱", "包络谱", "小波包能量")):
-        with tab:
-            st.info(f"{selected} {name}数据将按该通道独立展示。" if channel_result.visualization is None else f"{selected} {name}")
+    visualization = channel_result.visualization
+    if visualization is None:
+        for tab in tabs:
+            with tab:
+                st.info(f"{selected} 无可用图表数据。")
+    else:
+        with tabs[0]:
+            series = visualization.time_domain
+            if series is None:
+                st.info("无可用时域数据。")
+            else:
+                frame = pd.DataFrame({"时间 / s": series.time_s, "幅值": series.amplitude}).set_index("时间 / s")
+                st.line_chart(frame)
+        with tabs[1]:
+            series = visualization.frequency_spectrum
+            if series is None:
+                st.info("无可用频谱数据。")
+            else:
+                frame = pd.DataFrame({"频率 / Hz": series.frequency_hz, "幅值": series.amplitude}).set_index("频率 / Hz")
+                st.line_chart(frame)
+        with tabs[2]:
+            series = visualization.envelope_spectrum
+            if series is None:
+                st.info("无可用包络谱数据。")
+            else:
+                frame = pd.DataFrame({"频率 / Hz": series.frequency_hz, "幅值": series.amplitude}).set_index("频率 / Hz")
+                st.line_chart(frame)
+        with tabs[3]:
+            series = visualization.wavelet_packet_energy
+            if series is None:
+                st.info("无可用小波包能量数据。")
+            else:
+                frame = pd.DataFrame({"频带": series.band_labels, "能量占比": series.energy_ratio}).set_index("频带")
+                st.bar_chart(frame)
 
     if app_result.report_path and Path(app_result.report_path).is_file():
         st.download_button(

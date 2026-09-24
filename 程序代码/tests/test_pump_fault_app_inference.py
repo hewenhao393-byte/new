@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from pump_fault_app.domain.diagnosis_models import ChannelInput, MultiChannelInferenceRequest
-from pump_fault_app.domain.formal_contract import FORMAL_FEATURE_NAMES
+from pump_fault_app.domain.formal_contract import FORMAL_FEATURE_NAMES, FORMAL_V3_CONTRACT
 from pump_fault_app.inference import run_multichannel_inference
 from pump_fault_app.prediction.catboost_loader import LoadedCatBoost43Models
 
@@ -49,6 +49,17 @@ def test_run_multichannel_inference_returns_probability_fusion(tmp_path: Path, m
     assert result.predicted_label == "转子不平衡"
     assert result.fused_probabilities == (0.20, 0.40, 0.05, 0.10, 0.10, 0.15)
     assert all(item.window_count == 1 for item in result.channel_results)
+    for item in result.channel_results:
+        assert item.visualization is not None
+        assert item.visualization.time_domain is not None
+        assert item.visualization.frequency_spectrum is not None
+        assert item.visualization.envelope_spectrum is not None
+        assert item.visualization.wavelet_packet_energy is not None
+
+
+def test_v3_envelope_band_matches_accepted_feature_contract() -> None:
+    assert FORMAL_V3_CONTRACT.envelope_low_hz == 1000.0
+    assert FORMAL_V3_CONTRACT.envelope_high_hz == 5000.0
 
 
 def test_invalid_channel_is_excluded_and_all_invalid_returns_failed(tmp_path: Path, monkeypatch) -> None:

@@ -139,7 +139,13 @@ def _extract_accepted_feature_map(samples: np.ndarray, rpm: float) -> OrderedDic
         -np.sum(wavelet_ratio * np.log(wavelet_ratio + EPSILON)) / np.log(8)
     )
 
-    sos = butter(4, [1000, 5000], btype="bandpass", fs=contract.target_sampling_rate, output="sos")
+    sos = butter(
+        4,
+        [contract.envelope_low_hz, contract.envelope_high_hz],
+        btype="bandpass",
+        fs=contract.target_sampling_rate,
+        output="sos",
+    )
     envelope = np.abs(hilbert(sosfiltfilt(sos, samples)))
     envelope = envelope - envelope.mean()
     envelope_frequency, envelope_power = _spectrum(envelope, 5, 500)
