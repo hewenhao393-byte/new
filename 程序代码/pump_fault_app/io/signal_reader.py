@@ -41,9 +41,10 @@ def read_vibration_signal(request: RawSignalReadRequest) -> RawSignalRecord:
 
     frame = _load_table(file_path)
     selected_signal_column, time_column = _select_columns(frame, request.signal_column, request.time_column)
-    samples = pd.to_numeric(frame[selected_signal_column], errors="coerce").dropna().to_numpy(dtype=np.float64)
-    if samples.size == 0:
+    numeric_signal = pd.to_numeric(frame[selected_signal_column], errors="coerce")
+    if not numeric_signal.notna().any():
         raise RawSignalReadError("selected signal column is empty")
+    samples = numeric_signal.to_numpy(dtype=np.float64)
 
     sampling_rate_hz = int(request.sampling_rate_hz)
     duration_seconds = float(samples.size / sampling_rate_hz)
