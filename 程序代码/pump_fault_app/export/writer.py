@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from pump_fault_app.batch import BatchInferenceResult
+from pump_fault_app.domain.diagnosis_models import MultiChannelDiagnosisResult
+from pump_fault_app.reporting import build_diagnosis_summary
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ def export_batch_result(batch_result: BatchInferenceResult, *, output_dir: Path)
     csv_path = output_dir / "batch_diagnosis_summary.csv"
 
     json_path.write_text(
-        json.dumps(asdict(batch_result), ensure_ascii=False, indent=2),
+        json.dumps(asdict(batch_result), ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     _write_summary_csv(batch_result, csv_path)
@@ -51,6 +53,8 @@ def export_diagnosis_summary(summary: object, *, output_dir: Path) -> SummaryExp
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "diagnosis_summary.json"
     csv_path = output_dir / "diagnosis_summary.csv"
+    if isinstance(summary, MultiChannelDiagnosisResult):
+        summary = build_diagnosis_summary(summary)
     summary_dict = summary.as_dict()
     json_path.write_text(
         json.dumps(summary_dict, ensure_ascii=False, indent=2),
@@ -69,45 +73,15 @@ def export_diagnosis_summary(summary: object, *, output_dir: Path) -> SummaryExp
 
 
 def _write_summary_csv(batch_result: BatchInferenceResult, csv_path: Path) -> None:
-    fieldnames = [
-        "success",
-        "status",
-        "message",
-        "file_name",
-        "sampling_rate_hz",
-        "rpm",
-        "device_id",
-        "measurement_position",
-        "diagnosis_label",
-        "confidence",
-        "window_count",
-        "failure_stage",
-        "failure_message",
-        "warnings",
-        "rejection_reasons",
-        "top_probabilities",
-    ]
+    fieldnames = list(build_diagnosis_summary(batch_result.results[0]).as_dict()) if batch_result.results else []
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for summary in batch_result.summaries:
+        for result in batch_result.results:
+            payload = build_diagnosis_summary(result).as_dict()
             writer.writerow(
                 {
-                    "success": summary.success,
-                    "status": summary.status,
-                    "message": summary.message,
-                    "file_name": summary.file_name,
-                    "sampling_rate_hz": summary.sampling_rate_hz,
-                    "rpm": summary.rpm,
-                    "device_id": summary.device_id,
-                    "measurement_position": summary.measurement_position,
-                    "diagnosis_label": summary.diagnosis_label,
-                    "confidence": summary.confidence,
-                    "window_count": summary.window_count,
-                    "failure_stage": summary.failure_stage,
-                    "failure_message": summary.failure_message,
-                    "warnings": " | ".join(summary.warnings),
-                    "rejection_reasons": " | ".join(summary.rejection_reasons),
-                    "top_probabilities": json.dumps(summary.top_probabilities, ensure_ascii=False),
+                    key: json.dumps(value, ensure_ascii=False) if isinstance(value, (list, tuple, dict)) else value
+                    for key, value in payload.items()
                 }
             )

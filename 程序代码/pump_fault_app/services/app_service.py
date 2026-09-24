@@ -24,6 +24,10 @@ class AppSingleRunRequest:
 @dataclass(frozen=True)
 class AppSingleRunResult:
     inference_result: MultiChannelDiagnosisResult
+    inference_request: MultiChannelInferenceRequest
+    summary: object
+    export_result: object | None = None
+    report_path: Path | None = None
     vibration_direction: str | None = None
     history_record: object | None = None
     history_warning: str | None = None
@@ -34,16 +38,33 @@ class AppBatchRunRequest:
     items: tuple[MultiChannelInferenceRequest, ...] | None = None
     manifest_path: Path | None = None
     model_directory: Path | None = None
+    export_root: Path | None = None
 
 
 @dataclass(frozen=True)
 class AppBatchRunResult:
     batch_result: BatchInferenceResult
+    export_result: object | None = None
 
 
 def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
+    from pump_fault_app.reporting import build_diagnosis_summary
+
+    inference_result = run_multichannel_inference(request.inference_request)
+    summary = build_diagnosis_summary(inference_result)
+    export_result = None
+    if request.export_root is not None:
+        from pump_fault_app.export import create_export_output_dir, export_diagnosis_summary
+
+        export_result = export_diagnosis_summary(
+            inference_result,
+            output_dir=create_export_output_dir(request.export_root, prefix="single_run"),
+        )
     app_result = AppSingleRunResult(
-        inference_result=run_multichannel_inference(request.inference_request),
+        inference_result=inference_result,
+        inference_request=request.inference_request,
+        summary=summary,
+        export_result=export_result,
         vibration_direction=request.vibration_direction,
     )
     if app_result.inference_result.status != "diagnosed":
@@ -51,8 +72,16 @@ def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
     try:
         from pump_fault_app.history.service import (
             DEFAULT_HISTORY_DATABASE_PATH,
+            DEFAULT_HISTORY_REPORT_DIR,
             record_single_diagnosis_history,
         )
+        from pump_fault_app.services.report_export_service import export_single_diagnosis_report
+        from uuid import uuid4
+        from datetime import datetime
+
+        report_root = request.history_report_dir or DEFAULT_HISTORY_REPORT_DIR
+        report_path = Path(report_root) / f"{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:8]}.docx"
+        export_single_diagnosis_report(app_result, report_path)
 
         history_record = record_single_diagnosis_history(
             app_result.inference_result,
@@ -60,8 +89,9 @@ def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
             sampling_rate_hz=request.inference_request.sampling_rate_hz,
             rpm=request.inference_request.rpm,
             database_path=request.history_database_path or DEFAULT_HISTORY_DATABASE_PATH,
+            report_path=report_path,
         )
-        return replace(app_result, history_record=history_record)
+        return replace(app_result, history_record=history_record, report_path=report_path)
     except Exception:
         return replace(app_result, history_warning="诊断已完成，但V3历史记录未能保存。")
 
@@ -85,4 +115,12 @@ def run_batch_diagnosis(request: AppBatchRunRequest) -> AppBatchRunResult:
             diagnosed_count=diagnosed_count,
             results=results,
         )
-    return AppBatchRunResult(batch_result=batch_result)
+    export_result = None
+    if request.export_root is not None:
+        from pump_fault_app.export import create_export_output_dir, export_batch_result
+
+        export_result = export_batch_result(
+            batch_result,
+            output_dir=create_export_output_dir(request.export_root, prefix="batch_run"),
+        )
+    return AppBatchRunResult(batch_result=batch_result, export_result=export_result)

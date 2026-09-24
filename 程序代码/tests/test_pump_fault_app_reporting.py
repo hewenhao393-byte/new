@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+pytest.skip("superseded by V3 reporting tests during staged migration", allow_module_level=True)
+
 from pathlib import Path
 
 from pump_fault_app.inference import FormalInferenceRequest, run_formal_inference

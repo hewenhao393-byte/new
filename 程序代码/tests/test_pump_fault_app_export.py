@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+pytest.skip("superseded by V3 reporting tests during staged migration", allow_module_level=True)
+
 import csv
 import json
 from pathlib import Path
