@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from pump_fault_app.inference import FormalInferenceResult
+from pump_fault_app.domain.diagnosis_models import MultiChannelDiagnosisResult
+from pump_fault_app.domain.formal_contract import FORMAL_LABEL_ORDER
+from pump_fault_app.domain.labels import display_label
 
 
 @dataclass(frozen=True)
@@ -11,103 +13,44 @@ class DiagnosisSummary:
     success: bool
     status: str
     message: str
-    file_name: str | None
-    sampling_rate_hz: int | None
-    rpm: float | None
-    device_id: str | None
-    measurement_position: str | None
+    input_channels: tuple[str, ...]
+    valid_channels: tuple[str, ...]
+    invalid_channels: tuple[str, ...]
     diagnosis_label: str | None
-    confidence: float | None
-    window_count: int | None
-    failure_stage: str | None
-    failure_message: str | None
+    model_output_probabilities: tuple[dict[str, float | str], ...]
+    agreement_level: str | None
+    agreement_count: int
+    model_version: str
+    feature_version: str
+    contract_version: str
     warnings: tuple[str, ...] = ()
-    rejection_reasons: tuple[str, ...] = ()
-    top_probabilities: tuple[dict[str, float | str], ...] = ()
-    runtime_warnings: tuple[str, ...] = ()
-    runtime_alerts: tuple[dict[str, str], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def build_diagnosis_summary(result: FormalInferenceResult) -> DiagnosisSummary:
-    raw_signal = result.raw_signal
-    quality_report = result.quality_report
-    record_prediction = result.record_prediction
-    runtime_alerts = _build_runtime_alerts(result.runtime_warnings)
-
-    if result.success and raw_signal is not None and quality_report is not None and record_prediction is not None:
-        ranked_probabilities = tuple(
-            {"label": label, "probability": probability}
-            for label, probability in sorted(
-                record_prediction.label_probabilities.items(),
-                key=lambda item: item[1],
-                reverse=True,
-            )
+def build_diagnosis_summary(result: MultiChannelDiagnosisResult) -> DiagnosisSummary:
+    probabilities = ()
+    if result.fused_probabilities is not None:
+        probabilities = tuple(
+            {"label": display_label(label), "internal_label": label, "probability": probability}
+            for label, probability in zip(FORMAL_LABEL_ORDER, result.fused_probabilities)
         )
-        return DiagnosisSummary(
-            success=True,
-            status="diagnosed",
-            message="诊断完成",
-            file_name=raw_signal.file_name,
-            sampling_rate_hz=raw_signal.sampling_rate_hz,
-            rpm=raw_signal.rpm,
-            device_id=raw_signal.device_id,
-            measurement_position=raw_signal.measurement_position,
-            diagnosis_label=record_prediction.predicted_label,
-            confidence=record_prediction.confidence,
-            window_count=record_prediction.window_count,
-            failure_stage=None,
-            failure_message=None,
-            warnings=quality_report.warnings,
-            rejection_reasons=(),
-            top_probabilities=ranked_probabilities,
-            runtime_warnings=result.runtime_warnings,
-            runtime_alerts=runtime_alerts,
-        )
-
-    if result.failure_stage == "quality" and raw_signal is not None and quality_report is not None:
-        return DiagnosisSummary(
-            success=False,
-            status="rejected",
-            message="信号质量不满足诊断条件",
-            file_name=raw_signal.file_name,
-            sampling_rate_hz=raw_signal.sampling_rate_hz,
-            rpm=raw_signal.rpm,
-            device_id=raw_signal.device_id,
-            measurement_position=raw_signal.measurement_position,
-            diagnosis_label=None,
-            confidence=None,
-            window_count=None,
-            failure_stage=result.failure_stage,
-            failure_message=result.failure_message,
-            warnings=quality_report.warnings,
-            rejection_reasons=quality_report.rejection_reasons,
-            top_probabilities=(),
-            runtime_warnings=result.runtime_warnings,
-            runtime_alerts=runtime_alerts,
-        )
-
     return DiagnosisSummary(
-        success=False,
-        status="input_error" if result.failure_stage == "input" else "failed",
-        message="输入文件读取失败" if result.failure_stage == "input" else "诊断失败",
-        file_name=raw_signal.file_name if raw_signal is not None else None,
-        sampling_rate_hz=raw_signal.sampling_rate_hz if raw_signal is not None else None,
-        rpm=raw_signal.rpm if raw_signal is not None else None,
-        device_id=raw_signal.device_id if raw_signal is not None else None,
-        measurement_position=raw_signal.measurement_position if raw_signal is not None else None,
-        diagnosis_label=None,
-        confidence=None,
-        window_count=None,
-        failure_stage=result.failure_stage,
-        failure_message=result.failure_message,
-        warnings=(),
-        rejection_reasons=(),
-        top_probabilities=(),
-        runtime_warnings=result.runtime_warnings,
-        runtime_alerts=runtime_alerts,
+        success=result.status == "diagnosed",
+        status=result.status,
+        message="诊断完成" if result.status == "diagnosed" else "无有效通道，诊断失败",
+        input_channels=result.input_channels,
+        valid_channels=result.valid_channels,
+        invalid_channels=result.invalid_channels,
+        diagnosis_label=display_label(result.predicted_label) if result.predicted_label else None,
+        model_output_probabilities=probabilities,
+        agreement_level=result.agreement_level,
+        agreement_count=result.agreement_count,
+        model_version=result.model_version,
+        feature_version=result.feature_version,
+        contract_version=result.contract_version,
+        warnings=result.warnings,
     )
 
 

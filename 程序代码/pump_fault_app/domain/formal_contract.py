@@ -1,19 +1,9 @@
-"""Frozen V2 inference contract owned by the diagnosis application.
-
-The legacy ``pump_diagnosis.inference_contract`` module re-exports this API so
-experiment scripts remain compatible, while deployed application modules no
-longer depend on the experiment package.
-"""
+"""The single frozen CatBoost43 V3 inference contract."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
-
-import joblib
-
-from pump_fault_app.version import APP_VERSION, MODEL_VERSION
+from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
 
 
 FORMAL_SOFTWARE_VERSION = APP_VERSION
@@ -29,17 +19,34 @@ FORMAL_LABEL_ORDER = (
 )
 
 FORMAL_FEATURE_NAMES = (
-    "kurtosis",
+    "rms",
+    "std",
+    "peak_to_peak",
     "skewness",
+    "kurtosis",
     "crest_factor",
     "impulse_factor",
     "clearance_factor",
     "shape_factor",
+    "rot_1x_energy_ratio",
+    "rot_2x_energy_ratio",
+    "rot_3x_energy_ratio",
     "rot_2x_1x_ratio",
     "rot_3x_1x_ratio",
     "harmonic_energy_ratio_1x_5x",
+    "harmonic_energy_ratio_3x_5x",
+    "rot_2x_harmonic_ratio",
+    "rot_05x_1x_ratio",
+    "noninteger_harmonic_energy_ratio",
     "spectral_entropy",
     "spectral_flatness",
+    "spectral_centroid",
+    "spectral_bandwidth",
+    "band_energy_5_300_ratio",
+    "band_energy_300_1000_ratio",
+    "band_energy_1000_3000_ratio",
+    "band_energy_3000_5000_ratio",
+    "high_low_energy_ratio",
     "wp_energy_ratio_0",
     "wp_energy_ratio_1",
     "wp_energy_ratio_2",
@@ -48,27 +55,22 @@ FORMAL_FEATURE_NAMES = (
     "wp_energy_ratio_5",
     "wp_energy_ratio_6",
     "wp_energy_ratio_7",
+    "wp_energy_entropy",
     "env_kurtosis",
     "env_crest_factor",
-)
-
-FORMAL_BUNDLE_KEYS = {"imputer", "scaler", "model", "features"}
-FORMAL_MODEL_BUNDLE_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "实验结果"
-    / "多转速统一六分类实验V2"
-    / "six_class_models"
-    / "bp"
-    / "bp_bundle.joblib"
+    "env_spectral_entropy",
+    "env_peak_energy_ratio",
+    "env_peak_concentration",
+    "env_peak_count",
 )
 
 
 def validate_feature_names(feature_names: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     normalized = tuple(feature_names)
-    if len(normalized) != 21:
-        raise ValueError(f"formal feature names must contain 21 entries, got {len(normalized)}")
+    if len(normalized) != 43:
+        raise ValueError(f"formal feature names must contain 43 entries, got {len(normalized)}")
     if normalized != FORMAL_FEATURE_NAMES:
-        raise ValueError("formal feature names do not match the frozen V2 order")
+        raise ValueError("formal feature names do not match the frozen V3 order")
     return normalized
 
 
@@ -81,25 +83,16 @@ def validate_label_order(label_order: tuple[str, ...] | list[str]) -> tuple[str,
     return normalized
 
 
-def _validate_model_classes(classes_: Any) -> tuple[str, ...]:
-    if classes_ is None:
-        raise ValueError("model is missing classes_")
-    normalized = tuple(str(label) for label in classes_)
-    if len(normalized) != 6 or set(normalized) != set(FORMAL_LABEL_ORDER):
-        raise ValueError("model classes_ cannot be mapped to the formal label order")
-    return normalized
-
-
 @dataclass(frozen=True)
 class SignalContract:
     target_sampling_rate: int = 12_000
-    filter_low_hz: float = 10.0
+    filter_low_hz: float = 5.0
     filter_high_hz: float = 5000.0
-    window_size: int = 2400
-    step_size: int = 1200
+    window_size: int = 4800
+    step_size: int = 2400
     wavelet: str = "db6"
     wavelet_level: int = 3
-    envelope_low_hz: float = 2000.0
+    envelope_low_hz: float = 1000.0
     envelope_high_hz: float = 5000.0
     harmonic_search_half_width_hz: float = 5.0
 
@@ -142,14 +135,15 @@ class LabelContract:
 
 @dataclass(frozen=True)
 class ModelContract:
-    bundle_path: Path = FORMAL_MODEL_BUNDLE_PATH
+    model_type: str = "CatBoost"
     model_version: str = FORMAL_MODEL_VERSION
-    required_bundle_keys: frozenset[str] = frozenset(FORMAL_BUNDLE_KEYS)
 
 
 @dataclass(frozen=True)
 class SoftwareContract:
     software_version: str = FORMAL_SOFTWARE_VERSION
+    feature_version: str = FEATURE_VERSION
+    inference_contract_version: str = INFERENCE_CONTRACT_VERSION
 
 
 @dataclass(frozen=True)
@@ -159,6 +153,7 @@ class FormalInferenceContract:
     labels: LabelContract = LabelContract()
     model: ModelContract = ModelContract()
     software: SoftwareContract = SoftwareContract()
+    channels: tuple[str, ...] = ("CH3", "CH4", "CH5")
 
     @property
     def target_sampling_rate(self) -> int:
@@ -208,10 +203,6 @@ class FormalInferenceContract:
     def label_order(self) -> tuple[str, ...]:
         return self.labels.names
 
-    @property
-    def model_bundle_path(self) -> Path:
-        return self.model.bundle_path
-
     def validate(self) -> "FormalInferenceContract":
         self.signal.validate()
         self.features.validate()
@@ -220,28 +211,9 @@ class FormalInferenceContract:
             raise ValueError("software version must be non-empty")
         if not self.model.model_version:
             raise ValueError("model version must be non-empty")
+        if self.channels != ("CH3", "CH4", "CH5"):
+            raise ValueError("formal channels must be CH3, CH4, CH5")
         return self
 
 
-FORMAL_V2_CONTRACT = FormalInferenceContract().validate()
-
-
-def validate_model_bundle(bundle_path: Path | str | None = None) -> dict[str, Any]:
-    path = FORMAL_MODEL_BUNDLE_PATH if bundle_path is None else Path(bundle_path)
-    bundle = joblib.load(path)
-    if not isinstance(bundle, dict):
-        raise ValueError("model bundle must be a dict-like object")
-    missing = FORMAL_BUNDLE_KEYS.difference(bundle.keys())
-    if missing:
-        raise ValueError(f"model bundle is missing required keys: {sorted(missing)}")
-    features = validate_feature_names(tuple(bundle["features"]))
-    model = bundle["model"]
-    if not hasattr(model, "predict_proba"):
-        raise ValueError("model bundle model must support predict_proba")
-    _validate_model_classes(getattr(model, "classes_", None))
-    return {
-        "imputer": bundle["imputer"],
-        "scaler": bundle["scaler"],
-        "model": model,
-        "features": features,
-    }
+FORMAL_V3_CONTRACT = FormalInferenceContract().validate()

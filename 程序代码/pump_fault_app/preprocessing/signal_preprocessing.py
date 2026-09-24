@@ -5,12 +5,12 @@ from fractions import Fraction
 import numpy as np
 from scipy import signal
 
-from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V3_CONTRACT
 from pump_fault_app.domain.records import PreprocessedSignalRecord, RawSignalRecord
 
 
 def preprocess_raw_signal(record: RawSignalRecord) -> PreprocessedSignalRecord:
-    contract = FORMAL_V2_CONTRACT.signal
+    contract = FORMAL_V3_CONTRACT.signal
     processing_log: list[str] = []
 
     samples = np.asarray(record.samples, dtype=np.float64)
@@ -34,7 +34,7 @@ def preprocess_raw_signal(record: RawSignalRecord) -> PreprocessedSignalRecord:
         output="sos",
     )
     filtered = signal.sosfiltfilt(sos, resampled)
-    processing_log.append("bandpass_filter")
+    processing_log.append("5-5000 Hz zero-phase bandpass")
     processed = np.asarray(filtered, dtype=np.float64) - np.mean(filtered)
     processing_log.append("demean_after_filter")
 

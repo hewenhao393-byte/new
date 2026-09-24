@@ -5,23 +5,16 @@ from pathlib import Path
 
 import pandas as pd
 
-from pump_fault_app.batch.service import BatchInferenceResult
-from pump_fault_app.inference import FormalInferenceRequest, run_formal_inference
-from pump_fault_app.reporting import build_diagnosis_summary
+from pump_fault_app.batch.service import BatchInferenceRequest, BatchInferenceResult, run_batch_inference
+from pump_fault_app.domain.diagnosis_models import ChannelInput, MultiChannelInferenceRequest
 
 
-_REQUIRED_COLUMNS = ("file_path", "sampling_rate_hz", "rpm")
+_REQUIRED_COLUMNS = ("sampling_rate_hz", "rpm")
 
 
 @dataclass(frozen=True)
 class BatchManifestItem:
-    file_path: Path
-    sampling_rate_hz: int
-    rpm: float
-    signal_column: str | None = None
-    time_column: str | None = None
-    device_id: str | None = None
-    measurement_position: str | None = None
+    request: MultiChannelInferenceRequest
 
 
 @dataclass(frozen=True)
@@ -46,46 +39,22 @@ def load_batch_manifest(manifest_path: Path | str) -> BatchManifest:
 def run_batch_inference_from_manifest(
     manifest: BatchManifest,
     *,
-    model_bundle_path: Path | None = None,
+    model_directory: Path | None = None,
 ) -> BatchInferenceResult:
-    summaries = tuple(
-        build_diagnosis_summary(
-            run_formal_inference(
-                FormalInferenceRequest(
-                    file_path=item.file_path,
-                    sampling_rate_hz=item.sampling_rate_hz,
-                    rpm=item.rpm,
-                    signal_column=item.signal_column,
-                    time_column=item.time_column,
-                    device_id=item.device_id,
-                    measurement_position=item.measurement_position,
-                    model_bundle_path=model_bundle_path,
-                )
-            )
+    requests = tuple(
+        MultiChannelInferenceRequest(
+            channels=item.request.channels,
+            sampling_rate_hz=item.request.sampling_rate_hz,
+            rpm=item.request.rpm,
+            model_directory=model_directory or item.request.model_directory,
         )
         for item in manifest.items
     )
-    diagnosed_count = sum(summary.status == "diagnosed" for summary in summaries)
-    rejected_count = sum(summary.status == "rejected" for summary in summaries)
-    input_error_count = sum(summary.status == "input_error" for summary in summaries)
-    success_count = sum(summary.success for summary in summaries)
-    total_count = len(summaries)
-    return BatchInferenceResult(
-        total_count=total_count,
-        success_count=success_count,
-        failure_count=total_count - success_count,
-        diagnosed_count=diagnosed_count,
-        rejected_count=rejected_count,
-        input_error_count=input_error_count,
-        summaries=summaries,
-    )
+    return run_batch_inference(BatchInferenceRequest(requests))
 
 
 def _row_to_manifest_item(row: pd.Series) -> BatchManifestItem:
     row_number = int(row.name) + 1
-    file_path_text = str(row["file_path"]).strip()
-    if not file_path_text:
-        raise ValueError(f"manifest row {row_number} has empty file_path")
     sampling_rate_hz = int(row["sampling_rate_hz"])
     if sampling_rate_hz <= 0:
         raise ValueError(f"manifest row {row_number} has invalid sampling_rate_hz")
@@ -93,14 +62,24 @@ def _row_to_manifest_item(row: pd.Series) -> BatchManifestItem:
     if rpm <= 0.0:
         raise ValueError(f"manifest row {row_number} has invalid rpm")
 
+    channels = []
+    for channel in ("CH3", "CH4", "CH5"):
+        prefix = channel.lower()
+        file_path = _optional_text(row, f"{prefix}_file")
+        if file_path is None:
+            continue
+        channels.append(
+            ChannelInput(
+                channel,
+                Path(file_path),
+                _optional_text(row, f"{prefix}_signal_column"),
+                _optional_text(row, f"{prefix}_time_column"),
+            )
+        )
+    if not channels:
+        raise ValueError(f"manifest row {row_number} must provide at least one channel file")
     return BatchManifestItem(
-        file_path=Path(file_path_text),
-        sampling_rate_hz=sampling_rate_hz,
-        rpm=rpm,
-        signal_column=_optional_text(row, "signal_column"),
-        time_column=_optional_text(row, "time_column"),
-        device_id=_optional_text(row, "device_id"),
-        measurement_position=_optional_text(row, "measurement_position"),
+        MultiChannelInferenceRequest(tuple(channels), sampling_rate_hz=sampling_rate_hz, rpm=rpm)
     )
 
 

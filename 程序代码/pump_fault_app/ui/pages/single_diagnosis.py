@@ -11,6 +11,7 @@ import pandas as pd
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
 from pump_fault_app.presentation.single_diagnosis import (
     build_probability_rows,
+    build_result_card_items,
     build_upload_signal_info,
     build_single_summary_items,
     build_single_visual_availability,
@@ -31,8 +32,11 @@ def build_single_run_request(
     time_column: str | None = None,
     device_id: str | None = None,
     measurement_position: str | None = None,
+    vibration_direction: str | None = None,
     model_bundle_path: Path | None = None,
     export_root: Path | None = None,
+    history_database_path: Path | None = None,
+    history_report_dir: Path | None = None,
 ) -> AppSingleRunRequest:
     return AppSingleRunRequest(
         file_path=file_path,
@@ -42,8 +46,11 @@ def build_single_run_request(
         time_column=time_column or None,
         device_id=device_id or None,
         measurement_position=measurement_position or None,
+        vibration_direction=vibration_direction or None,
         model_bundle_path=model_bundle_path,
         export_root=export_root,
+        history_database_path=history_database_path,
+        history_report_dir=history_report_dir,
     )
 
 
@@ -51,8 +58,6 @@ def get_single_advanced_field_labels() -> dict[str, str]:
     return {
         "signal_column": "振动信号列（选填，留空时自动识别）",
         "time_column": "时间列（选填，留空时自动识别）",
-        "device_id": "设备编号（选填）",
-        "measurement_position": "测点位置（选填，例如：泵驱动端水平）",
         "export": "导出设置",
     }
 
@@ -190,7 +195,7 @@ def main() -> None:
 
     uploaded_file = st.file_uploader("振动数据文件", type=["csv", "txt", "wav"])
     st.markdown(
-        '<div class="input-note">输入信号采样率可不同于模型标准采样率，系统会在正式推理中自动完成重采样处理。</div>',
+        '<div class="input-note">“输入采样率”应填写原始采集频率；系统将在质量检查后自动重采样至正式推理所需的 12000 Hz，无需预先修改数据文件。</div>',
         unsafe_allow_html=True,
     )
     col1, col2 = st.columns(2)
@@ -199,11 +204,17 @@ def main() -> None:
     with col2:
         rpm = float(st.number_input("转速 rpm", min_value=1.0, value=1450.0, step=10.0))
 
+    equipment_col, position_col, direction_col = st.columns(3)
+    with equipment_col:
+        device_id = st.text_input("设备编号（选填）", value="")
+    with position_col:
+        measurement_position = st.text_input("测点位置（选填）", value="", placeholder="例如：泵驱动端")
+    with direction_col:
+        vibration_direction = st.selectbox("振动方向", ("水平", "垂直", "轴向", "其他/未注明"))
+
     with st.expander("高级设置", expanded=False):
         signal_column = st.text_input(labels["signal_column"], value="")
         time_column = st.text_input(labels["time_column"], value="")
-        device_id = st.text_input(labels["device_id"], value="")
-        measurement_position = st.text_input(labels["measurement_position"], value="")
         export_enabled = st.checkbox(labels["export"], value=True, help="勾选后生成可下载的 JSON/CSV 结果文件。")
 
     if uploaded_file is not None:
@@ -217,6 +228,8 @@ def main() -> None:
                 signal_column=signal_column,
                 time_column=time_column,
                 measurement_position=measurement_position,
+                device_id=device_id,
+                vibration_direction=vibration_direction,
             ),
             use_container_width=True,
             hide_index=True,
@@ -238,6 +251,7 @@ def main() -> None:
                 time_column=time_column,
                 device_id=device_id,
                 measurement_position=measurement_position,
+                vibration_direction=vibration_direction,
                 export_root=Path(tempfile.mkdtemp(prefix="pump_single_export_")) if export_enabled else None,
             )
         )
@@ -252,14 +266,15 @@ def main() -> None:
             st.success("诊断完成")
         else:
             st.error(summary.message)
+        if result.history_warning:
+            st.warning("诊断已完成，但历史记录或Word报告未能保存。")
 
         quality_text = result.inference_result.quality_report.quality_level if result.inference_result.quality_report is not None else "-"
         st.markdown("#### 诊断结论总览")
+        result_cards = build_result_card_items(result)
         metric_cols = st.columns(4)
-        metric_cols[0].metric("预测故障类别", summary.diagnosis_label or "-")
-        metric_cols[1].metric("综合置信度", "-" if summary.confidence is None else f"{summary.confidence:.3f}")
-        metric_cols[2].metric("有效窗口数", "-" if summary.window_count is None else str(summary.window_count))
-        metric_cols[3].metric("信号质量", quality_text)
+        for column, (label, value) in zip(metric_cols, result_cards.items()):
+            column.metric(label, value)
 
         if visual_availability["probability_chart"]:
             st.subheader("六分类概率分布")
@@ -331,17 +346,10 @@ def main() -> None:
         )
 
         if summary.runtime_alerts:
-            st.info("信号处理状态：已完成数值稳定性保护处理，不影响诊断结果。")
-            with st.expander(f"查看详细运行告警（{len(summary.runtime_alerts)} 条）", expanded=False):
-                st.dataframe(summary.runtime_alerts, use_container_width=True, hide_index=True)
+            st.info("数值稳定性提示，不影响诊断结果。")
 
         if result.visualization is not None and result.visualization.warnings:
-            st.warning("部分可视化数据生成失败，已保留正式诊断结果。")
-            st.dataframe(
-                [{"告警": warning} for warning in result.visualization.warnings],
-                use_container_width=True,
-                hide_index=True,
-            )
+            st.warning("部分振动特征图未生成，正式诊断结果不受影响。")
 
         st.subheader("报告导出")
         _render_downloads(st, result.export_result)

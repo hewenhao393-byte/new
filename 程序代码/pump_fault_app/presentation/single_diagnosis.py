@@ -8,7 +8,10 @@ from typing import Any
 
 import pandas as pd
 
-from pump_fault_app.presentation.status import build_runtime_processing_status
+from pump_fault_app.presentation.status import (
+    build_engineering_risk_level,
+    build_runtime_processing_status,
+)
 
 
 _DISPLAY_LABELS = (
@@ -55,9 +58,11 @@ def build_upload_signal_info(
     signal_column: str | None,
     time_column: str | None,
     measurement_position: str | None,
+    device_id: str | None = None,
+    vibration_direction: str | None = None,
 ) -> list[dict[str, str]]:
     size_text = "-" if file_size_bytes is None else _format_file_size(file_size_bytes)
-    return [
+    rows = [
         {"项目": "文件名称", "内容": file_name},
         {"项目": "文件大小", "内容": size_text},
         {"项目": "输入采样率", "内容": f"{sampling_rate_hz} Hz"},
@@ -66,6 +71,31 @@ def build_upload_signal_info(
         {"项目": "时间列", "内容": time_column or "自动识别"},
         {"项目": "测点位置", "内容": measurement_position or "未填写"},
     ]
+    if device_id is not None:
+        rows.insert(2, {"项目": "设备编号", "内容": device_id or "未填写"})
+    if vibration_direction is not None:
+        rows.append({"项目": "振动方向", "内容": vibration_direction or "未填写"})
+    return rows
+
+
+def build_result_card_items(result: Any) -> dict[str, str]:
+    """Format four engineering result indicators from the existing service output."""
+    summary = result.summary
+    label = getattr(summary, "diagnosis_label", None)
+    confidence = getattr(summary, "confidence", None)
+    predictions = getattr(result.inference_result, "window_predictions", None)
+    consistency = None
+    if predictions and label is not None:
+        consistency = sum(1 for item in predictions if item.predicted_label == label) / len(predictions)
+    return {
+        "诊断结果": label or "-",
+        "置信度": "-" if confidence is None else f"{float(confidence):.1%}",
+        "窗口一致率": "-" if consistency is None else f"{consistency:.1%}",
+        "风险等级": build_engineering_risk_level(
+            success=bool(getattr(summary, "success", False)),
+            label=label,
+        ),
+    }
 
 
 def _format_file_size(size_bytes: int) -> str:

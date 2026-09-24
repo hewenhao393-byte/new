@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE, build_research_style
-from pump_fault_app.ui.pages import batch_diagnosis, report_view, single_diagnosis
+from pump_fault_app.ui.pages.v3_pages import (
+    batch_diagnosis_page,
+    history_page,
+    report_page,
+    single_diagnosis_page,
+    system_overview_page,
+)
 
 
 def build_home_sections() -> dict[str, Any]:
@@ -27,18 +39,20 @@ def build_home_sections() -> dict[str, Any]:
             {"title": "汽蚀", "description": "宽带水力扰动", "tone": "fault"},
         ),
         "pipeline": (
-            "振动信号输入",
+            "信号采集",
             "信号预处理",
-            "特征提取",
-            "BP神经网络",
-            "六分类故障识别",
-            "诊断报告输出",
+            "特征分析",
+            "CatBoost独立诊断",
+            "通道概率融合",
+            "六分类状态判断",
+            "自动报告生成",
         ),
         "parameters": {
             "默认采样率": "12000 Hz",
-            "分析窗口": "2400点",
-            "滑动步长": "1200点",
-            "分析频带": "10–5000 Hz",
+            "分析窗口": "4800点",
+            "滑动步长": "2400点",
+            "分析频带": "5–5000 Hz",
+            "模型与特征": "CH3/CH4/CH5 · 43维 · CatBoost",
         },
     }
 
@@ -46,9 +60,11 @@ def build_home_sections() -> dict[str, Any]:
 def build_navigation_items() -> list[dict[str, Any]]:
     return [
         {"title": "系统首页", "nav_label": "01 系统首页", "icon": None, "callable": render_home_page, "url_path": "home"},
-        {"title": "单文件诊断", "nav_label": "02 单文件诊断", "icon": None, "callable": single_diagnosis.main, "url_path": "single"},
-        {"title": "批量诊断", "nav_label": "03 批量诊断", "icon": None, "callable": batch_diagnosis.main, "url_path": "batch"},
-        {"title": "诊断结果", "nav_label": "04 诊断结果", "icon": None, "callable": report_view.main, "url_path": "report"},
+        {"title": "多通道诊断", "nav_label": "02 多通道诊断", "icon": None, "callable": single_diagnosis_page, "url_path": "single"},
+        {"title": "批量诊断", "nav_label": "03 批量诊断", "icon": None, "callable": batch_diagnosis_page, "url_path": "batch"},
+        {"title": "诊断结果", "nav_label": "04 诊断结果", "icon": None, "callable": report_page, "url_path": "report"},
+        {"title": "历史记录", "nav_label": "05 历史记录", "icon": None, "callable": history_page, "url_path": "history"},
+        {"title": "系统说明", "nav_label": "06 系统说明", "icon": None, "callable": system_overview_page, "url_path": "overview"},
     ]
 
 
@@ -94,7 +110,7 @@ def render_home_page(single_page: Any) -> None:
         )
     with right:
         st.markdown("### 正式推理参数")
-        st.markdown('<p class="section-intro">参数与 BP 六分类模型训练阶段保持一致。</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-intro">参数与 CatBoost43 V3 正式部署契约保持一致。</p>', unsafe_allow_html=True)
         for label, value in sections["parameters"].items():
             st.markdown(
                 f'<div class="app-card"><strong>{label}</strong><br><span class="section-intro">{value}</span></div>',
@@ -102,7 +118,7 @@ def render_home_page(single_page: Any) -> None:
             )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("进入单文件智能诊断", type="primary", use_container_width=True):
+    if st.button("进入多通道智能诊断", type="primary", use_container_width=True):
         st.switch_page(single_page)
 
 

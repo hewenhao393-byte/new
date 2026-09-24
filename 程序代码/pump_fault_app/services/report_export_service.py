@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 from pump_fault_app.reporting import SingleReportViewData, build_single_report_view_data, export_single_report_to_docx
-from pump_fault_app.services.app_service import AppSingleRunResult
+
+if TYPE_CHECKING:
+    from pump_fault_app.services.app_service import AppSingleRunResult
 
 
-SingleReportExportInput = Union[AppSingleRunResult, SingleReportViewData]
+SingleReportExportInput = Union["AppSingleRunResult", SingleReportViewData]
 
 
 def export_single_diagnosis_report(

@@ -6,7 +6,7 @@ from html import escape
 
 
 APP_TITLE = "水泵智能故障诊断系统"
-APP_SUBTITLE = "基于振动信号与机器学习的六分类故障识别"
+APP_SUBTITLE = "43维 CatBoost · CH3/CH4/CH5 独立诊断与概率融合"
 
 
 def build_research_style() -> str:

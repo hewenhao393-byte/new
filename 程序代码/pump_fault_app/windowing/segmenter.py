@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V3_CONTRACT
 from pump_fault_app.domain.records import PreprocessedSignalRecord, SignalWindow, WindowingResult
 
 
 def segment_preprocessed_signal(record: PreprocessedSignalRecord) -> WindowingResult:
-    signal_contract = FORMAL_V2_CONTRACT.signal
+    signal_contract = FORMAL_V3_CONTRACT.signal
     window_size = signal_contract.window_size
     step_size = signal_contract.step_size
     sample_rate_hz = record.target_sampling_rate_hz

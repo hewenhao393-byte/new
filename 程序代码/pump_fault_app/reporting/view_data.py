@@ -6,9 +6,13 @@ from typing import Any
 
 from pump_fault_app.domain.formal_contract import (
     FORMAL_LABEL_ORDER,
-    FORMAL_V2_CONTRACT,
+    FORMAL_V3_CONTRACT,
 )
-from pump_fault_app.presentation.status import build_runtime_processing_status
+from pump_fault_app.presentation.status import (
+    build_engineering_risk_level,
+    build_runtime_processing_status,
+    build_user_runtime_notice,
+)
 from pump_fault_app.version import APP_VERSION, MODEL_VERSION
 
 
@@ -88,6 +92,7 @@ class SingleReportConclusion:
     probability_gap: str
     window_consistency: str
     diagnosis_grade: str
+    risk_level: str
     diagnosis_advice: str
     warning_messages: tuple[str, ...]
 
@@ -112,6 +117,7 @@ class SingleReportConclusion:
             "window_consistency": consistency_value,
             "window_consistency_text": self.window_consistency if consistency_value is not None else "-",
             "diagnosis_level": self.diagnosis_grade,
+            "risk_level": self.risk_level,
             "suggestion": self.diagnosis_advice,
             "warnings": list(self.warning_messages),
             "runtime_alert_count": int(runtime_alert_count),
@@ -124,6 +130,8 @@ class SingleReportViewData:
     conclusion: SingleReportConclusion
     probabilities: tuple[ReportProbabilityItem, ...]
     window_distribution: tuple[ReportWindowDistributionItem, ...]
+    processing_parameters: tuple[ReportKeyValueItem, ...]
+    method_steps: tuple[str, ...]
     visualization_availability: ReportVisualizationAvailability
     time_domain: Any | None
     frequency_spectrum: Any | None
@@ -146,6 +154,8 @@ class SingleReportViewData:
             ),
             "class_probabilities": [item.to_dict() for item in self.probabilities],
             "window_distribution": [item.to_dict() for item in self.window_distribution],
+            "processing_parameters": [item.to_dict() for item in self.processing_parameters],
+            "method_steps": list(self.method_steps),
             "visualization_availability": self.visualization_availability.to_dict(),
             "visualization_summary": {
                 "time_domain_points": _series_point_count(self.time_domain, "time_s"),
@@ -178,7 +188,7 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
     if preprocessed_signal is not None:
         target_sampling_rate = f"{preprocessed_signal.target_sampling_rate_hz} Hz"
     elif getattr(summary, "sampling_rate_hz", None) is not None:
-        target_sampling_rate = f"{FORMAL_V2_CONTRACT.target_sampling_rate} Hz"
+        target_sampling_rate = f"{FORMAL_V3_CONTRACT.target_sampling_rate} Hz"
 
     signal_duration = "-"
     if raw_signal is not None and getattr(raw_signal, "duration_seconds", None) is not None:
@@ -192,11 +202,20 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
     window_consistency = _compute_window_consistency(result)
 
     runtime_alert_count = len(getattr(summary, "runtime_alerts", ()))
+    runtime_notice = build_user_runtime_notice(runtime_alert_count)
+    warning_messages = tuple(
+        message
+        for message in (runtime_notice, *visualization_availability.messages)
+        if message
+    )
+    diagnosis_label = getattr(summary, "diagnosis_label", None)
+    success = bool(getattr(summary, "success", diagnosis_label is not None))
     return SingleReportViewData(
         basic_info=(
             ReportKeyValueItem("文件名", str(getattr(summary, "file_name", None) or "-")),
             ReportKeyValueItem("设备编号", str(getattr(summary, "device_id", None) or "-")),
             ReportKeyValueItem("测点位置", str(getattr(summary, "measurement_position", None) or "-")),
+            ReportKeyValueItem("振动方向", str(getattr(result, "vibration_direction", None) or "-")),
             ReportKeyValueItem("原始采样率", "-" if getattr(summary, "sampling_rate_hz", None) is None else f"{summary.sampling_rate_hz} Hz"),
             ReportKeyValueItem("目标采样率", target_sampling_rate),
             ReportKeyValueItem("转速", "-" if getattr(summary, "rpm", None) is None else f"{summary.rpm:.1f} rpm"),
@@ -212,11 +231,23 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
             probability_gap=probability_gap,
             window_consistency="-" if window_consistency is None else f"{window_consistency:.1%}",
             diagnosis_grade=_build_diagnosis_grade(getattr(summary, "confidence", None)),
-            diagnosis_advice=_build_diagnosis_advice(getattr(summary, "diagnosis_label", None)),
-            warning_messages=tuple(getattr(summary, "runtime_warnings", ())) + visualization_availability.messages,
+            risk_level=build_engineering_risk_level(success=success, label=diagnosis_label),
+            diagnosis_advice=_build_diagnosis_advice(diagnosis_label),
+            warning_messages=warning_messages,
         ),
         probabilities=_build_probability_items(summary_top_probabilities),
         window_distribution=_build_window_distribution(result),
+        processing_parameters=_build_processing_parameters(),
+        method_steps=(
+            "读取振动信号及设备工况信息",
+            "检查信号长度、有限值与基本质量",
+            "去除直流分量并统一重采样至12000 Hz",
+            "采用5～5000 Hz零相位带通滤波",
+            "按4800点窗口、2400点步长进行滑动分段",
+            "按冻结顺序提取43维振动特征",
+            "调用通道独立 CatBoost 完成窗口级六分类并融合概率",
+            "自动生成诊断结果与报告",
+        ),
         visualization_availability=visualization_availability,
         time_domain=None if result.visualization is None else result.visualization.time_domain,
         frequency_spectrum=None if result.visualization is None else result.visualization.frequency_spectrum,
@@ -283,13 +314,30 @@ def _build_visualization_availability(result: Any) -> ReportVisualizationAvailab
         if not flags["wavelet_packet_energy"]:
             messages.append("小波包能量图数据不可用")
     if visualization is not None and visualization.warnings:
-        messages.extend(visualization.warnings)
+        messages.append("部分振动特征图未生成，正式诊断结果不受影响。")
     return ReportVisualizationAvailability(
         time_domain=flags["time_domain"],
         frequency_spectrum=flags["frequency_spectrum"],
         envelope_spectrum=flags["envelope_spectrum"],
         wavelet_packet_energy=flags["wavelet_packet_energy"],
         messages=tuple(messages),
+    )
+
+
+def _build_processing_parameters() -> tuple[ReportKeyValueItem, ...]:
+    contract = FORMAL_V3_CONTRACT
+    return (
+        ReportKeyValueItem("统一采样率", f"{contract.target_sampling_rate} Hz"),
+        ReportKeyValueItem("分析频带", f"{contract.filter_low_hz:g}～{contract.filter_high_hz:g} Hz"),
+        ReportKeyValueItem("窗口长度", f"{contract.window_size}点（0.2 s）"),
+        ReportKeyValueItem("窗口步长", f"{contract.step_size}点（50%重叠）"),
+        ReportKeyValueItem("窗口与步长", f"{contract.window_size}点 / {contract.step_size}点"),
+        ReportKeyValueItem("小波包参数", f"{contract.wavelet}，{contract.wavelet_level}层分解"),
+        ReportKeyValueItem(
+            "包络分析频带",
+            f"{contract.envelope_low_hz:g}～{contract.envelope_high_hz:g} Hz",
+        ),
+        ReportKeyValueItem("模型输入", f"{len(contract.feature_names)}维振动特征"),
     )
 
 
