@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V3_CONTRACT
 
 
 _FEATURE_LABELS = {
@@ -27,7 +27,7 @@ _FEATURE_LABELS = {
 
 def build_system_overview() -> dict[str, Any]:
     """Build display data from the immutable formal inference contract."""
-    contract = FORMAL_V2_CONTRACT
+    contract = FORMAL_V3_CONTRACT
     labels = tuple("机械松动" if label == "松动" else label for label in contract.label_order)
     features = tuple(_FEATURE_LABELS[name] for name in contract.feature_names)
     parameters = {

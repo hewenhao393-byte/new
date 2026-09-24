@@ -6,7 +6,7 @@ from typing import Any
 
 from pump_fault_app.domain.formal_contract import (
     FORMAL_LABEL_ORDER,
-    FORMAL_V2_CONTRACT,
+    FORMAL_V3_CONTRACT,
 )
 from pump_fault_app.presentation.status import (
     build_engineering_risk_level,
@@ -188,7 +188,7 @@ def build_single_report_view_data(result: Any) -> SingleReportViewData:
     if preprocessed_signal is not None:
         target_sampling_rate = f"{preprocessed_signal.target_sampling_rate_hz} Hz"
     elif getattr(summary, "sampling_rate_hz", None) is not None:
-        target_sampling_rate = f"{FORMAL_V2_CONTRACT.target_sampling_rate} Hz"
+        target_sampling_rate = f"{FORMAL_V3_CONTRACT.target_sampling_rate} Hz"
 
     signal_duration = "-"
     if raw_signal is not None and getattr(raw_signal, "duration_seconds", None) is not None:
@@ -325,7 +325,7 @@ def _build_visualization_availability(result: Any) -> ReportVisualizationAvailab
 
 
 def _build_processing_parameters() -> tuple[ReportKeyValueItem, ...]:
-    contract = FORMAL_V2_CONTRACT
+    contract = FORMAL_V3_CONTRACT
     return (
         ReportKeyValueItem("统一采样率", f"{contract.target_sampling_rate} Hz"),
         ReportKeyValueItem("分析频带", f"{contract.filter_low_hz:g}～{contract.filter_high_hz:g} Hz"),
