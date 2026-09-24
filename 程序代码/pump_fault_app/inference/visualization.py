@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V3_CONTRACT
 from pump_fault_app.domain.records import (
     DiagnosisVisualizationData,
     PreprocessedSignalRecord,
@@ -96,7 +96,7 @@ def _build_envelope_spectrum(preprocessed_signal: PreprocessedSignalRecord | Non
 
 
 def _truncate_spectrum(freqs: np.ndarray, amps: np.ndarray) -> SpectrumSeries:
-    mask = freqs <= FORMAL_V2_CONTRACT.filter_high_hz
+    mask = freqs <= FORMAL_V3_CONTRACT.filter_high_hz
     visible_freqs = np.asarray(freqs[mask], dtype=np.float64)
     visible_amps = np.asarray(amps[mask], dtype=np.float64)
     resolution_hz = 0.0 if visible_freqs.shape[0] < 2 else float(visible_freqs[1] - visible_freqs[0])
@@ -126,7 +126,7 @@ def _build_wavelet_packet_energy(
     mean_ratios = np.mean(energy_rows, axis=0)
     total = float(np.sum(mean_ratios))
     normalized = mean_ratios if total <= 0.0 else mean_ratios / total
-    band_width_hz = (FORMAL_V2_CONTRACT.target_sampling_rate / 2.0) / len(ratio_names)
+    band_width_hz = (FORMAL_V3_CONTRACT.target_sampling_rate / 2.0) / len(ratio_names)
     starts = tuple(float(index * band_width_hz) for index in range(len(ratio_names)))
     ends = tuple(float((index + 1) * band_width_hz) for index in range(len(ratio_names)))
     labels = tuple(_format_band_label(start, end) for start, end in zip(starts, ends))
@@ -135,8 +135,8 @@ def _build_wavelet_packet_energy(
         band_start_hz=starts,
         band_end_hz=ends,
         energy_ratio=tuple(float(value) for value in normalized),
-        wavelet=FORMAL_V2_CONTRACT.wavelet,
-        decomposition_level=FORMAL_V2_CONTRACT.wavelet_level,
+        wavelet=FORMAL_V3_CONTRACT.wavelet,
+        decomposition_level=FORMAL_V3_CONTRACT.wavelet_level,
     )
 
 

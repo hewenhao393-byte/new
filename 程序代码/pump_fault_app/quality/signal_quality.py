@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pump_fault_app.domain.formal_contract import FORMAL_V2_CONTRACT
+from pump_fault_app.domain.formal_contract import FORMAL_V3_CONTRACT
 from pump_fault_app.domain.records import RawSignalRecord, SignalQualityReport
 
 
@@ -32,9 +32,9 @@ def assess_signal_quality(record: RawSignalRecord) -> SignalQualityReport:
         rejection_reasons.append("signal contains NaN values")
     if inf_count > 0:
         rejection_reasons.append("signal contains infinite values")
-    if record.sampling_rate_hz < FORMAL_V2_CONTRACT.signal.filter_high_hz * 2:
+    if record.sampling_rate_hz < FORMAL_V3_CONTRACT.signal.filter_high_hz * 2:
         rejection_reasons.append("sampling rate is too low for 5000 Hz analysis")
-    if record.sample_count < FORMAL_V2_CONTRACT.signal.window_size:
+    if record.sample_count < FORMAL_V3_CONTRACT.signal.window_size:
         rejection_reasons.append("signal length is shorter than one formal window")
     if is_all_zero:
         rejection_reasons.append("signal is all zeros")

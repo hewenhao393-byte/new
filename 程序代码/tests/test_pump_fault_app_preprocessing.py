@@ -100,5 +100,5 @@ def test_preprocess_records_processing_log() -> None:
     result = preprocess_raw_signal(_record(samples, sampling_rate_hz=fs))
 
     assert "demean_before_resample" in result.processing_log
-    assert "bandpass_filter" in result.processing_log
+    assert "5-5000 Hz zero-phase bandpass" in result.processing_log
     assert "demean_after_filter" in result.processing_log
