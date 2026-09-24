@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from pump_fault_app.domain.formal_contract import (
+    FORMAL_FEATURE_NAMES,
     FORMAL_LABEL_ORDER,
-    FORMAL_MODEL_BUNDLE_PATH,
-    FORMAL_V2_CONTRACT,
+    FORMAL_V3_CONTRACT,
     validate_feature_names,
     validate_label_order,
-    validate_model_bundle,
 )
+from pump_fault_app.domain.diagnosis_models import ChannelInput, MultiChannelInferenceRequest
+from pump_fault_app.prediction import DEFAULT_MODEL_DIRECTORY, load_catboost43_models
 from pump_fault_app.services import AppSingleRunRequest, run_single_diagnosis
 from pump_fault_app.version import APP_VERSION, FEATURE_VERSION, INFERENCE_CONTRACT_VERSION, MODEL_VERSION
 
@@ -41,9 +42,9 @@ def load_demo_sample_config(path: str | Path | None = None) -> dict[str, Any]:
 def run_system_self_check(
     *,
     demo_config_path: str | Path | None = None,
-    model_bundle_path: str | Path | None = None,
+    model_directory: str | Path | None = None,
 ) -> dict[str, Any]:
-    bundle_path = Path(model_bundle_path) if model_bundle_path is not None else FORMAL_MODEL_BUNDLE_PATH
+    deployment_directory = Path(model_directory) if model_directory is not None else DEFAULT_MODEL_DIRECTORY
     items: list[dict[str, str]] = []
 
     _record(items, "formal_contract", "passed", "formal inference contract loaded")
@@ -57,25 +58,25 @@ def run_system_self_check(
         ),
     )
     try:
-        FORMAL_V2_CONTRACT.validate()
-        validate_feature_names(FORMAL_V2_CONTRACT.feature_names)
+        FORMAL_V3_CONTRACT.validate()
+        validate_feature_names(FORMAL_FEATURE_NAMES)
         validate_label_order(FORMAL_LABEL_ORDER)
-        _record(items, "formal_parameters", "passed", "12000 Hz, 10-5000 Hz, 2400/1200, db6, 2000-5000 Hz")
+        _record(items, "formal_parameters", "passed", "12000 Hz, 5-5000 Hz, 4800/2400, db6 level 3, 43 features")
     except Exception as exc:
         _record(items, "formal_parameters", "failed", str(exc))
 
-    if bundle_path.exists():
-        _record(items, "model_bundle_exists", "passed", str(bundle_path))
+    if deployment_directory.exists():
+        _record(items, "deployment_models_exist", "passed", str(deployment_directory))
         try:
-            validate_model_bundle(bundle_path)
-            _record(items, "model_bundle_contract", "passed", "bundle keys, labels, features and predict_proba validated")
+            loaded = load_catboost43_models(deployment_directory)
+            _record(items, "deployment_model_contract", "passed", f"validated {', '.join(loaded.models)} hashes, features and classes")
         except Exception as exc:
-            _record(items, "model_bundle_contract", "failed", str(exc))
+            _record(items, "deployment_model_contract", "failed", str(exc))
     else:
-        _record(items, "model_bundle_exists", "failed", f"missing model bundle: {bundle_path}")
-        _record(items, "model_bundle_contract", "failed", "bundle validation skipped because model bundle is missing")
+        _record(items, "deployment_models_exist", "failed", f"missing deployment model directory: {deployment_directory}")
+        _record(items, "deployment_model_contract", "failed", "model validation skipped because deployment directory is missing")
 
-    for module_name in ("numpy", "pandas", "scipy", "joblib", "streamlit"):
+    for module_name in ("numpy", "pandas", "scipy", "catboost", "streamlit"):
         _record_dependency(items, module_name)
     for module_name in ("docx", "matplotlib"):
         _record_dependency(items, module_name, check_name=f"word_dependency_{module_name}")
@@ -96,7 +97,7 @@ def run_system_self_check(
             payload = load_demo_sample_config(config_path)
             samples = payload["samples"]
             _record(items, "demo_sample_config", "passed", f"loaded {len(samples)} demo sample entries from {config_path}")
-            _run_demo_diagnosis_check(items, samples, bundle_path)
+            _run_demo_diagnosis_check(items, samples, deployment_directory)
         except Exception as exc:
             _record(items, "demo_sample_config", "failed", str(exc))
             _record(items, "demo_sample_minimal_diagnosis", "warning", "demo diagnosis skipped because demo config could not be loaded")
@@ -110,32 +111,40 @@ def run_system_self_check(
     return {"overall_status": overall_status, "items": items}
 
 
-def _run_demo_diagnosis_check(items: list[dict[str, str]], samples: list[dict[str, Any]], bundle_path: Path) -> None:
+def _run_demo_diagnosis_check(items: list[dict[str, str]], samples: list[dict[str, Any]], model_directory: Path) -> None:
     if not samples:
         _record(items, "demo_sample_minimal_diagnosis", "warning", "demo sample list is empty")
         return
     sample = samples[0]
-    sample_path = Path(str(sample["file_path"]))
-    if not sample_path.exists():
-        _record(items, "demo_sample_minimal_diagnosis", "warning", f"demo sample file not found: {sample_path}")
+    channel_rows = sample.get("channels")
+    if not isinstance(channel_rows, list) or not channel_rows:
+        _record(items, "demo_sample_minimal_diagnosis", "warning", "demo sample does not define V3 channels")
         return
-    if not bundle_path.exists():
-        _record(items, "demo_sample_minimal_diagnosis", "warning", "demo diagnosis skipped because model bundle is missing")
+    channels = tuple(
+        ChannelInput(
+            str(row["channel"]).upper(),
+            Path(str(row["file_path"])),
+            row.get("signal_column"),
+            row.get("time_column"),
+        )
+        for row in channel_rows
+    )
+    missing_paths = [str(item.file_path) for item in channels if not item.file_path.exists()]
+    if missing_paths:
+        _record(items, "demo_sample_minimal_diagnosis", "warning", f"demo sample files not found: {missing_paths}")
         return
     result = run_single_diagnosis(
         AppSingleRunRequest(
-            file_path=sample_path,
-            sampling_rate_hz=int(sample["sampling_rate"]),
-            rpm=float(sample["rpm"]),
-            signal_column=sample.get("signal_column"),
-            time_column=sample.get("time_column"),
-            device_id=sample.get("device_id"),
-            measurement_position=sample.get("measurement_position"),
-            model_bundle_path=bundle_path,
+            MultiChannelInferenceRequest(
+                channels,
+                sampling_rate_hz=int(sample["sampling_rate"]),
+                rpm=float(sample["rpm"]),
+                model_directory=model_directory,
+            )
         )
     )
-    status = "passed" if result.summary.success else "warning"
-    _record(items, "demo_sample_minimal_diagnosis", status, result.summary.message)
+    status = "passed" if result.inference_result.status == "diagnosed" else "warning"
+    _record(items, "demo_sample_minimal_diagnosis", status, result.inference_result.status)
 
 
 def _record_dependency(items: list[dict[str, str]], module_name: str, *, check_name: str | None = None) -> None:
