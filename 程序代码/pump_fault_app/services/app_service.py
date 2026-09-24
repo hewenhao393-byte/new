@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pump_fault_app.batch import (
@@ -42,10 +42,28 @@ class AppBatchRunResult:
 
 
 def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
-    return AppSingleRunResult(
+    app_result = AppSingleRunResult(
         inference_result=run_multichannel_inference(request.inference_request),
         vibration_direction=request.vibration_direction,
     )
+    if app_result.inference_result.status != "diagnosed":
+        return app_result
+    try:
+        from pump_fault_app.history.service import (
+            DEFAULT_HISTORY_DATABASE_PATH,
+            record_single_diagnosis_history,
+        )
+
+        history_record = record_single_diagnosis_history(
+            app_result.inference_result,
+            source_files={item.channel: str(item.file_path) for item in request.inference_request.channels},
+            sampling_rate_hz=request.inference_request.sampling_rate_hz,
+            rpm=request.inference_request.rpm,
+            database_path=request.history_database_path or DEFAULT_HISTORY_DATABASE_PATH,
+        )
+        return replace(app_result, history_record=history_record)
+    except Exception:
+        return replace(app_result, history_warning="诊断已完成，但V3历史记录未能保存。")
 
 
 def run_batch_diagnosis(request: AppBatchRunRequest) -> AppBatchRunResult:

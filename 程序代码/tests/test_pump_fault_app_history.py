@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+pytest.skip("superseded by V3 history tests during staged migration", allow_module_level=True)
+
 import sqlite3
 from pathlib import Path
 
