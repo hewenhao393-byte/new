@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE, build_research_style
 from pump_fault_app.ui.pages.v3_pages import (

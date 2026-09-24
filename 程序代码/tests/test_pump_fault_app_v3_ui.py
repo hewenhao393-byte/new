@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -37,3 +39,19 @@ def test_request_builder_rejects_mixed_time_columns(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="全部提供或全部不提供"):
         build_multichannel_run_request(channels=channels, sampling_rate_hz=12_000, rpm=1500.0)
+
+
+def test_streamlit_entrypoint_imports_from_outside_project(tmp_path: Path) -> None:
+    entrypoint = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "streamlit_app.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import runpy; runpy.run_path({str(entrypoint)!r}, run_name='entrypoint_import_test')",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
