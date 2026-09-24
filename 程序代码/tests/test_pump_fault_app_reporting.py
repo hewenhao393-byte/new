@@ -201,12 +201,13 @@ def test_build_single_report_view_data_contains_complete_sections(tmp_path: Path
             model_bundle_path=bundle_path,
             device_id="Motor-2",
             measurement_position="泵端水平",
+            vibration_direction="水平",
         )
     )
 
     view_data = build_single_report_view_data(result)
 
-    assert len(view_data.basic_info) == 10
+    assert len(view_data.basic_info) == 11
     assert view_data.basic_info[0].label == "文件名"
     assert view_data.basic_info[0].value == "record.csv"
     assert view_data.conclusion.diagnosis_label == "转子不平衡"
@@ -218,6 +219,10 @@ def test_build_single_report_view_data_contains_complete_sections(tmp_path: Path
     basic_info = {item.label: item.value for item in view_data.basic_info}
     assert basic_info["模型版本"] == MODEL_VERSION
     assert basic_info["软件版本"] == APP_VERSION
+    assert basic_info["振动方向"] == "水平"
+    assert view_data.conclusion.risk_level == "需关注"
+    assert dict((item.label, item.value) for item in view_data.processing_parameters)["分析频带"] == "10～5000 Hz"
+    assert len(view_data.method_steps) == 8
 
 
 def test_report_view_data_keeps_runtime_alert_count_without_promoting_it_to_summary(tmp_path: Path) -> None:
@@ -238,6 +243,7 @@ def test_report_view_data_keeps_runtime_alert_count_without_promoting_it_to_summ
     )
 
     assert view_data.runtime_alert_count > 0
+    assert view_data.conclusion.warning_messages == ("数值稳定性提示，不影响诊断结果。",)
     assert {item.label for item in view_data.summary_items} >= {"处理状态"}
     assert "运行告警数" not in {item.label for item in view_data.summary_items}
 
@@ -369,6 +375,8 @@ def test_single_report_view_data_to_dict_returns_stable_top_level_keys(tmp_path:
         "conclusion",
         "class_probabilities",
         "window_distribution",
+        "processing_parameters",
+        "method_steps",
         "visualization_availability",
         "visualization_summary",
         "quality_text",
@@ -410,6 +418,9 @@ def test_single_report_view_data_to_dict_serializes_sections_and_keeps_label_ord
     assert payload["window_distribution"][0]["label"] == "转子不平衡"
     assert payload["window_distribution"][0]["count"] == 3
     assert payload["window_distribution"][0]["ratio_text"] == "100.0%"
+    assert payload["conclusion"]["risk_level"] == "需关注"
+    assert payload["processing_parameters"][0]["label"] == "统一采样率"
+    assert payload["method_steps"][-1] == "自动生成诊断结果与报告"
 
 
 def test_single_report_view_data_to_dict_default_omits_full_visualization_arrays(tmp_path: Path) -> None:
@@ -564,6 +575,19 @@ def test_export_single_report_to_docx_contains_title_and_core_text(tmp_path: Pat
     table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
 
     assert "水泵振动故障诊断报告" in full_text
+    for heading in (
+        "1. 基本信息",
+        "2. 诊断结论",
+        "3. 信号处理参数",
+        "4. 方法流程",
+        "5. 故障概率分析",
+        "6. 振动特征分析",
+        "7. 说明与适用范围",
+        "8. 生成信息",
+    ):
+        assert heading in full_text
+    assert "10～5000 Hz" in table_text
+    assert "2400点 / 1200点" in table_text
     assert "转子不平衡" in full_text or "转子不平衡" in table_text
     assert "正常" in table_text
     assert "汽蚀" in table_text
@@ -618,4 +642,4 @@ def test_export_single_report_to_docx_supports_missing_visualization(tmp_path: P
     full_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
     assert output_path.exists()
-    assert "可视化缺失提示" in full_text
+    assert "部分振动特征图未生成，正式诊断结果不受影响。" in full_text

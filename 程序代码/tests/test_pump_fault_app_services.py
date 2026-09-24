@@ -30,6 +30,7 @@ def test_run_single_diagnosis_returns_summary_and_optional_export(tmp_path: Path
             file_path=signal_path,
             sampling_rate_hz=12000,
             rpm=1500.0,
+            vibration_direction="水平",
             model_bundle_path=bundle_path,
             export_root=tmp_path / "single_exports",
         )
@@ -37,6 +38,7 @@ def test_run_single_diagnosis_returns_summary_and_optional_export(tmp_path: Path
 
     assert result.summary.success is True
     assert result.summary.status == "diagnosed"
+    assert result.vibration_direction == "水平"
     assert result.visualization is not None
     assert result.visualization.time_domain is not None
     assert result.export_result is not None

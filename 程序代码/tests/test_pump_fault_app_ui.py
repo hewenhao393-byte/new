@@ -33,13 +33,18 @@ from pump_fault_app.ui.pages.single_diagnosis import (
     build_wavelet_packet_rows,
     get_single_advanced_field_labels,
 )
-from pump_fault_app.presentation.status import build_runtime_processing_status
+from pump_fault_app.presentation.status import (
+    build_engineering_risk_level,
+    build_runtime_processing_status,
+    build_user_runtime_notice,
+)
 from pump_fault_app.presentation.batch_diagnosis import (
     build_batch_table_rows as build_presentation_batch_table_rows,
     build_batch_task_statistics,
 )
 from pump_fault_app.presentation.report_view import build_diagnosis_highlight
-from pump_fault_app.presentation.single_diagnosis import build_upload_signal_info
+from pump_fault_app.presentation.single_diagnosis import build_result_card_items, build_upload_signal_info
+from pump_fault_app.presentation.system_overview import build_system_overview
 from pump_fault_app.ui.branding import build_page_header, build_research_style
 
 
@@ -48,13 +53,19 @@ def test_build_single_run_request_returns_service_request(tmp_path: Path) -> Non
         file_path=tmp_path / "record.csv",
         sampling_rate_hz=12000,
         rpm=1450.0,
+        vibration_direction="轴向",
         export_root=tmp_path / "exports",
+        history_database_path=tmp_path / "history.sqlite3",
+        history_report_dir=tmp_path / "history_reports",
     )
 
     assert isinstance(request, AppSingleRunRequest)
     assert request.sampling_rate_hz == 12000
     assert request.rpm == 1450.0
+    assert request.vibration_direction == "轴向"
     assert request.export_root == tmp_path / "exports"
+    assert request.history_database_path == tmp_path / "history.sqlite3"
+    assert request.history_report_dir == tmp_path / "history_reports"
 
 
 def test_build_probability_rows_returns_fixed_display_order() -> None:
@@ -98,6 +109,17 @@ def test_build_single_summary_items_uses_neutral_processing_status_for_runtime_a
 def test_build_runtime_processing_status_is_neutral_but_preserves_detail_signal() -> None:
     assert build_runtime_processing_status(0) == "诊断流程正常完成。"
     assert build_runtime_processing_status(714) == "已完成数值稳定性保护处理，不影响诊断结果。"
+
+
+def test_engineering_risk_level_follows_approved_display_rule() -> None:
+    assert build_engineering_risk_level(success=True, label="正常") == "低风险"
+    assert build_engineering_risk_level(success=True, label="汽蚀") == "需关注"
+    assert build_engineering_risk_level(success=False, label=None) == "待复测"
+
+
+def test_user_runtime_notice_hides_low_level_warning_text() -> None:
+    assert build_user_runtime_notice(0) == ""
+    assert build_user_runtime_notice(2) == "数值稳定性提示，不影响诊断结果。"
 
 
 def test_report_view_uses_presentation_adapters_instead_of_page_helpers() -> None:
@@ -220,10 +242,109 @@ def test_build_home_sections_returns_title_and_modules() -> None:
         "轴承故障",
         "汽蚀",
     )
-    assert "振动信号输入" in sections["pipeline"]
+    assert "信号采集" in sections["pipeline"]
+    assert "特征分析" in sections["pipeline"]
+    assert "BP智能识别" in sections["pipeline"]
     assert sections["parameters"]["默认采样率"] == "12000 Hz"
     assert sections["fault_cards"][0]["title"] == "正常状态"
-    assert sections["pipeline"][-1] == "诊断报告输出"
+    assert sections["pipeline"][-1] == "自动报告生成"
+
+
+def test_system_overview_is_built_from_the_formal_contract() -> None:
+    overview = build_system_overview()
+
+    assert overview["title"] == "系统原理与模型说明"
+    assert overview["subtitle"] == "基于振动机理特征与BP神经网络的水泵六分类故障诊断方法"
+    assert overview["pipeline"] == (
+        "振动信号",
+        "预处理",
+        "滑动窗口",
+        "21维特征",
+        "BP模型",
+        "概率融合",
+        "六类故障",
+    )
+    assert len(overview["features"]) == 21
+    assert [group["title"] for group in overview["feature_groups"]] == [
+        "时域冲击特征",
+        "转频及倍频特征",
+        "频域能量特征",
+        "包络与小波特征",
+    ]
+    assert [len(group["features"]) for group in overview["feature_groups"]] == [6, 3, 2, 10]
+    assert sum(len(group["features"]) for group in overview["feature_groups"]) == 21
+    assert tuple(
+        feature_name
+        for group in overview["feature_groups"]
+        for feature_name in group["feature_names"]
+    ) == overview["formal_feature_names"]
+    assert all(group["explanation"] for group in overview["feature_groups"])
+    assert overview["model"]["名称"] == "BP神经网络六分类模型"
+    assert overview["labels"] == (
+        "正常",
+        "转子不平衡",
+        "联轴器不对中",
+        "机械松动",
+        "轴承故障",
+        "汽蚀",
+    )
+    assert overview["parameters"]["统一采样率"] == "12000 Hz"
+    assert overview["parameters"]["分析频带"] == "10～5000 Hz"
+    assert overview["parameters"]["窗口与步长"] == "2400点 / 1200点"
+    assert overview["parameters"]["小波包"] == "db6，3层分解"
+
+
+def test_system_overview_explains_window_prediction_and_probability_fusion() -> None:
+    overview = build_system_overview()
+
+    assert overview["model"]["诊断方式"] == "窗口级预测 + 多窗口概率融合"
+    assert "0.2 s" in overview["model"]["窗口级预测"]
+    assert "六类状态概率" in overview["model"]["窗口级预测"]
+    assert "同类概率取平均" in overview["model"]["多窗口概率融合"]
+    assert "最高平均概率" in overview["model"]["多窗口概率融合"]
+
+
+def test_system_overview_fault_feature_rows_match_the_frozen_feature_scope() -> None:
+    overview = build_system_overview()
+
+    assert [row["故障"] for row in overview["fault_feature_rows"]] == [
+        "转子不平衡",
+        "联轴器不对中",
+        "机械松动",
+        "轴承故障",
+        "汽蚀",
+    ]
+    table_text = " ".join(
+        str(value)
+        for row in overview["fault_feature_rows"]
+        for value in row.values()
+    )
+    assert "1X绝对幅值" not in table_text
+    assert "2X/1X" in table_text
+    assert "包络峭度" in table_text
+    assert "频谱熵" in table_text
+
+
+def test_system_overview_parameter_rows_are_wide_enough_for_full_values() -> None:
+    overview = build_system_overview()
+
+    assert [len(row) for row in overview["parameter_rows"]] == [3, 2]
+    values = [item["value"] for row in overview["parameter_rows"] for item in row]
+    assert "10～5000 Hz" in values
+    assert "2400点 / 1200点" in values
+
+
+def test_system_overview_page_renders_explanations_without_diagnosis_logic() -> None:
+    page = Path(__file__).resolve().parents[1] / "pump_fault_app" / "ui" / "pages" / "system_overview.py"
+    text = page.read_text(encoding="utf-8")
+
+    assert 'overview["feature_groups"]' in text
+    assert 'overview["fault_feature_rows"]' in text
+    assert 'overview["parameter_rows"]' in text
+    assert "st.metric" not in text
+    assert "run_formal_inference" not in text
+    assert "fuse_window_predictions" not in text
+    assert "extract_features" not in text
 
 
 def test_research_style_uses_light_scientific_palette_without_model_claims() -> None:
@@ -254,13 +375,137 @@ def test_build_navigation_items_returns_chinese_titles_in_expected_order() -> No
         "单文件诊断",
         "批量诊断",
         "诊断结果",
+        "历史记录",
+        "模型持续优化",
+        "系统说明",
     ]
     assert [item["nav_label"] for item in items] == [
         "01 系统首页",
         "02 单文件诊断",
         "03 批量诊断",
         "04 诊断结果",
+        "05 历史记录",
+        "06 模型优化",
+        "07 系统说明",
     ]
+
+
+def test_history_page_uses_history_repository_without_diagnosis_logic() -> None:
+    history_page = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "history.py"
+    )
+    text = history_page.read_text(encoding="utf-8")
+
+    assert "历史诊断记录" in text
+    assert '"下载"' in text
+    assert "SQLiteDiagnosisHistoryRepository" in text
+    assert "pump_fault_app.presentation.history" in text
+    assert "run_formal_inference" not in text
+    assert "extract_formal_features" not in text
+    assert "fuse_window_predictions" not in text
+    assert "load_formal_bp_bundle" not in text
+
+
+def test_history_page_requires_confirmation_before_deletion() -> None:
+    history_page = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "history.py"
+    )
+    text = history_page.read_text(encoding="utf-8")
+
+    assert '"删除"' in text
+    assert '"下载"' in text
+    assert "确认删除" in text
+    assert "取消" in text
+    assert "delete_history_record" in text
+    assert "st.session_state" in text
+    assert "report_delete_failed" in text
+    assert "### 删除记录" not in text
+    assert "操作" in text
+    assert "for record in records" in text
+    assert "history-download-" in text
+    assert "history-delete-start-" in text
+    assert "white-space: nowrap" in text
+    assert "text-overflow: ellipsis" in text
+    assert "escape(record.file_name)" in text
+    assert "{record.sampling_rate_hz} Hz · {record.rpm:g} rpm" in text
+    assert "run_formal_inference" not in text
+    assert "extract_formal_features" not in text
+    assert "fuse_window_predictions" not in text
+    assert "load_formal_bp_bundle" not in text
+
+
+def test_navigation_includes_model_optimization_without_formal_inference_changes() -> None:
+    app_source = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "streamlit_app.py"
+    ).read_text(encoding="utf-8")
+    page_source = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "model_optimization.py"
+    ).read_text(encoding="utf-8")
+
+    assert "模型持续优化" in app_source
+    assert "候选模型" in page_source
+    assert "人工批准" in page_source
+    assert "21维" in page_source
+    assert "run_formal_inference" not in page_source
+
+
+def test_model_optimization_page_displays_one_selectable_history_sample_at_a_time() -> None:
+    page_source = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "model_optimization.py"
+    ).read_text(encoding="utf-8")
+
+    assert "选择需要人工确认的历史样本" in page_source
+    assert "当前第 {selected_index + 1} / {len(records)} 条" in page_source
+    assert "for record in records:" not in page_source
+
+
+def test_model_optimization_page_uses_full_text_cards_for_formal_model_details() -> None:
+    page_source = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "model_optimization.py"
+    ).read_text(encoding="utf-8")
+
+    assert "model-version-card" in page_source
+    assert "overflow-wrap: anywhere" in page_source
+    assert "escape(formal.version)" in page_source
+    assert "escape(formal.status)" in page_source
+
+
+def test_single_diagnosis_page_shows_only_friendly_history_warning() -> None:
+    single_page = (
+        Path(__file__).resolve().parents[1]
+        / "pump_fault_app"
+        / "ui"
+        / "pages"
+        / "single_diagnosis.py"
+    )
+    text = single_page.read_text(encoding="utf-8")
+
+    assert "result.history_warning" in text
+    assert "诊断已完成，但历史记录或Word报告未能保存。" in text
+    assert "sqlite3" not in text
 
 
 def test_streamlit_app_imports_without_circular_page_dependency() -> None:
@@ -347,9 +592,37 @@ def test_get_single_advanced_field_labels_returns_user_friendly_labels() -> None
     assert labels == {
         "signal_column": "振动信号列（选填，留空时自动识别）",
         "time_column": "时间列（选填，留空时自动识别）",
-        "device_id": "设备编号（选填）",
-        "measurement_position": "测点位置（选填，例如：泵驱动端水平）",
         "export": "导出设置",
+    }
+
+
+def test_build_result_card_items_reports_consistency_and_risk_without_changing_prediction() -> None:
+    result = AppSingleRunResult(
+        inference_result=type(
+            "Inference",
+            (),
+            {
+                "window_predictions": (
+                    type("Prediction", (), {"predicted_label": "汽蚀"})(),
+                    type("Prediction", (), {"predicted_label": "汽蚀"})(),
+                    type("Prediction", (), {"predicted_label": "正常"})(),
+                )
+            },
+        )(),
+        summary=type(
+            "Summary",
+            (),
+            {"success": True, "diagnosis_label": "汽蚀", "confidence": 0.92},
+        )(),
+        export_result=None,
+        visualization=None,
+    )
+
+    assert build_result_card_items(result) == {
+        "诊断结果": "汽蚀",
+        "置信度": "92.0%",
+        "窗口一致率": "66.7%",
+        "风险等级": "需关注",
     }
 
 
@@ -606,7 +879,8 @@ def test_report_view_handles_partial_visualization_and_preserves_other_sections(
     assert view_data.visualization_availability.wavelet_packet_energy is False
     assert "频谱图数据不可用" in view_data.visualization_availability.messages
     assert "小波包能量图数据不可用" in view_data.visualization_availability.messages
-    assert "spectrum unavailable" in view_data.visualization_availability.messages
+    assert "部分振动特征图未生成，正式诊断结果不受影响。" in view_data.visualization_availability.messages
+    assert "spectrum unavailable" not in view_data.visualization_availability.messages
     assert view_data.time_domain is not None
     assert view_data.envelope_spectrum is not None
 

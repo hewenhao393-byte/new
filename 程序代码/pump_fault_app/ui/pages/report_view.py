@@ -108,6 +108,14 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
         confidence=view_data.conclusion.top_probability,
         grade=view_data.conclusion.diagnosis_grade,
     )
+    result_columns = st.columns(4)
+    result_columns[0].metric("诊断结果", view_data.conclusion.diagnosis_label)
+    result_columns[1].metric(
+        "置信度",
+        "-" if view_data.conclusion.top_probability == "-" else f"{float(view_data.conclusion.top_probability):.1%}",
+    )
+    result_columns[2].metric("窗口一致率", view_data.conclusion.window_consistency)
+    result_columns[3].metric("风险等级", view_data.conclusion.risk_level)
     visual_rows = {
         "time_domain": None if view_data.time_domain is None else build_time_domain_rows(view_data.time_domain),
         "frequency_spectrum": None if view_data.frequency_spectrum is None else build_spectrum_rows(view_data.frequency_spectrum),
@@ -130,6 +138,7 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
                 {"项目": "第二可能类别", "内容": view_data.conclusion.second_label},
                 {"项目": "概率差", "内容": view_data.conclusion.probability_gap},
                 {"项目": "窗口一致率", "内容": view_data.conclusion.window_consistency},
+                {"项目": "风险等级", "内容": view_data.conclusion.risk_level},
                 {"项目": "诊断等级", "内容": view_data.conclusion.diagnosis_grade},
                 {"项目": "诊断建议", "内容": view_data.conclusion.diagnosis_advice},
             ]
@@ -175,12 +184,8 @@ def _render_single_report(st: Any, result: AppSingleRunResult) -> None:
         _render_bar_chart(st, pd.DataFrame(visual_rows["wavelet_packet_energy"]), x_field="band_label", y_field="energy_ratio", x_title="频带", y_title="能量占比", color="#d29922")
 
     if view_data.visualization_availability.messages:
-        st.subheader("可视化告警")
-        st.dataframe(
-            pd.DataFrame([{"告警": item} for item in view_data.visualization_availability.messages]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        for message in view_data.visualization_availability.messages:
+            st.info(message)
 
     st.subheader("最终结果")
     st.metric("预测类别", summary.diagnosis_label or "-")

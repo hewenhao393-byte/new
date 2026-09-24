@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from pump_fault_app.ui.branding import APP_SUBTITLE, APP_TITLE, build_research_style
-from pump_fault_app.ui.pages import batch_diagnosis, report_view, single_diagnosis
+from pump_fault_app.ui.pages import (
+    batch_diagnosis,
+    history,
+    model_optimization,
+    report_view,
+    single_diagnosis,
+    system_overview,
+)
 
 
 def build_home_sections() -> dict[str, Any]:
@@ -27,12 +34,12 @@ def build_home_sections() -> dict[str, Any]:
             {"title": "汽蚀", "description": "宽带水力扰动", "tone": "fault"},
         ),
         "pipeline": (
-            "振动信号输入",
+            "信号采集",
             "信号预处理",
-            "特征提取",
-            "BP神经网络",
-            "六分类故障识别",
-            "诊断报告输出",
+            "特征分析",
+            "BP智能识别",
+            "六分类状态判断",
+            "自动报告生成",
         ),
         "parameters": {
             "默认采样率": "12000 Hz",
@@ -49,6 +56,9 @@ def build_navigation_items() -> list[dict[str, Any]]:
         {"title": "单文件诊断", "nav_label": "02 单文件诊断", "icon": None, "callable": single_diagnosis.main, "url_path": "single"},
         {"title": "批量诊断", "nav_label": "03 批量诊断", "icon": None, "callable": batch_diagnosis.main, "url_path": "batch"},
         {"title": "诊断结果", "nav_label": "04 诊断结果", "icon": None, "callable": report_view.main, "url_path": "report"},
+        {"title": "历史记录", "nav_label": "05 历史记录", "icon": None, "callable": history.main, "url_path": "history"},
+        {"title": "模型持续优化", "nav_label": "06 模型优化", "icon": None, "callable": model_optimization.main, "url_path": "optimization"},
+        {"title": "系统说明", "nav_label": "07 系统说明", "icon": None, "callable": system_overview.main, "url_path": "overview"},
     ]
 
 

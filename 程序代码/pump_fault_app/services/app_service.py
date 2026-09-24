@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pump_fault_app.batch import (
@@ -11,6 +11,7 @@ from pump_fault_app.batch import (
     run_batch_inference_from_manifest,
 )
 from pump_fault_app.domain.records import DiagnosisVisualizationData
+from pump_fault_app.history.models import DiagnosisHistoryRecord
 from pump_fault_app.export import (
     BatchExportResult,
     SummaryExportResult,
@@ -31,8 +32,12 @@ class AppSingleRunRequest:
     time_column: str | None = None
     device_id: str | None = None
     measurement_position: str | None = None
+    vibration_direction: str | None = None
     model_bundle_path: Path | None = None
     export_root: Path | None = None
+    history_database_path: Path | None = None
+    history_report_dir: Path | None = None
+    sample_database_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,9 @@ class AppSingleRunResult:
     summary: DiagnosisSummary
     export_result: SummaryExportResult | None
     visualization: DiagnosisVisualizationData | None
+    vibration_direction: str | None = None
+    history_record: DiagnosisHistoryRecord | None = None
+    history_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,12 +91,40 @@ def run_single_diagnosis(request: AppSingleRunRequest) -> AppSingleRunResult:
             summary,
             output_dir=create_export_output_dir(request.export_root, prefix="single_run"),
         )
-    return AppSingleRunResult(
+    app_result = AppSingleRunResult(
         inference_result=inference_result,
         summary=summary,
         export_result=export_result,
         visualization=inference_result.visualization,
+        vibration_direction=request.vibration_direction,
     )
+    if not summary.success:
+        return app_result
+
+    try:
+        from pump_fault_app.history.service import (
+            DEFAULT_HISTORY_DATABASE_PATH,
+            DEFAULT_HISTORY_REPORT_DIR,
+            record_single_diagnosis_history,
+        )
+        from pump_fault_app.sample_repository.service import DEFAULT_SAMPLE_DATABASE_PATH
+
+        history_record = record_single_diagnosis_history(
+            app_result,
+            database_path=request.history_database_path or DEFAULT_HISTORY_DATABASE_PATH,
+            report_dir=request.history_report_dir or DEFAULT_HISTORY_REPORT_DIR,
+            sample_database_path=(
+                request.sample_database_path
+                if request.sample_database_path is not None
+                else DEFAULT_SAMPLE_DATABASE_PATH
+            ),
+        )
+    except Exception:
+        return replace(
+            app_result,
+            history_warning="诊断已完成，但历史记录或Word报告未能保存。",
+        )
+    return replace(app_result, history_record=history_record)
 
 
 def run_batch_diagnosis(request: AppBatchRunRequest) -> AppBatchRunResult:
