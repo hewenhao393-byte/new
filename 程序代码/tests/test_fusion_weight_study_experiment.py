@@ -7,6 +7,7 @@ import pytest
 from fusion_weight_study.contracts import LABELS
 from fusion_weight_study.experiment import (
     ExperimentError,
+    channel_weight_source_metrics,
     cross_fitted_fusion,
     derive_final_weights,
     select_strategy,
@@ -42,6 +43,10 @@ def test_final_weights_come_from_all_oof_rows() -> None:
     weights = derive_final_weights(_oof())
     assert set(weights) == {"global", "classwise"}
     assert sum(weights["global"].values()) == pytest.approx(1.0)
+    source = channel_weight_source_metrics(_oof())
+    assert set(source["channel"]) == {3, 4, 5}
+    assert set(source["metric"]) == {"macro_f1", "class_f1"}
+    assert set(source.loc[source["metric"].eq("class_f1"), "label"]) == set(LABELS)
 
 
 def test_strategy_selection_uses_record_macro_f1_and_simplicity_tolerance() -> None:

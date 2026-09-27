@@ -11,7 +11,7 @@ import pandas as pd
 
 from .contracts import CHANNELS, FEATURE_NAMES, LABELS, MODEL_PARAMS, validate_source_manifest
 from .data import WINDOW_KEY, load_aligned_data, sha256_file
-from .experiment import PROBABILITY_COLUMNS, cross_fitted_fusion, derive_final_weights, fuse_long_predictions, select_strategy
+from .experiment import PROBABILITY_COLUMNS, channel_weight_source_metrics, cross_fitted_fusion, derive_final_weights, fuse_long_predictions, select_strategy
 from .metrics import aggregate_records, disagreement_statistics, evaluate_predictions, overdependence_rows
 from .modeling import generate_oof_predictions
 
@@ -157,6 +157,8 @@ def run_study(args) -> Path:
             "train_side_cv/per_class_metrics.csv": train_classes,
             "train_side_cv/disagreement.csv": disagreements.loc[disagreements["split"].eq("train_side_cv")],
             "train_side_cv/predictions.csv": cross_fused,
+            "train_side_cv/channel_oof_predictions.csv": oof,
+            "train_side_cv/channel_weight_source_metrics.csv": channel_weight_source_metrics(oof),
             "train_side_cv/channel_model_folds.csv": model_meta,
             "strict_parent_group/metrics.csv": strict_summary,
             "strict_parent_group/per_class_metrics.csv": strict_classes,

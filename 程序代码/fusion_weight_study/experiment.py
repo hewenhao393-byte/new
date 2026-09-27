@@ -37,6 +37,19 @@ def derive_final_weights(oof_predictions: pd.DataFrame) -> dict[str, Mapping]:
     }
 
 
+def channel_weight_source_metrics(oof_predictions: pd.DataFrame) -> pd.DataFrame:
+    global_scores, class_scores = _channel_scores(oof_predictions)
+    rows = [
+        {"channel": channel, "metric": "macro_f1", "label": "ALL", "value": global_scores[channel]}
+        for channel in CHANNELS
+    ]
+    rows.extend(
+        {"channel": channel, "metric": "class_f1", "label": label, "value": class_scores[channel][label]}
+        for channel in CHANNELS for label in LABELS
+    )
+    return pd.DataFrame(rows)
+
+
 def fuse_long_predictions(frame: pd.DataFrame, method: str, weights: Mapping | None = None) -> pd.DataFrame:
     sort_columns = list(WINDOW_KEY)
     ordered = {}
