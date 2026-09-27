@@ -43,7 +43,7 @@ def parent_from_record(record_id: str) -> str:
 
 
 def _load_channel(path: Path, channel: int) -> pd.DataFrame:
-    frame = pd.read_csv(path, encoding="utf-8-sig")
+    frame = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
     missing = set(WINDOW_KEY + MATCH_COLUMNS + ("channel",)) - set(frame.columns)
     if missing:
         raise DataContractError(f"CH{channel} missing columns: {sorted(missing)}")
